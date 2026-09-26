@@ -1,0 +1,12 @@
+# Credentials and machine-specific helpers — never commit
+.env
+tools/
+.claude/
+
+# Build and editor leftovers
+build/
+*.orig
+*.rej
+*.pyc
+__pycache__/
+.DS_Store

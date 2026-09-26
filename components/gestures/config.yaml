@@ -1,0 +1,40 @@
+# InputActions — touchpad gestures (Mac ergonomics).
+# Three-finger swipe walks through open application windows.
+device_rules:
+  - conditions: $touchpad
+    # direction is decided after this much movement (default 10)
+    motion_threshold_3: 3
+    swipe:
+      angle_tolerance: 30
+
+touchpad:
+  gestures:
+    - type: swipe
+      fingers: 3
+      direction: left
+      actions:
+        - on: begin          # fire as soon as the direction is known
+          plasma_shortcut: kwin,AppCycle Next
+
+    - type: swipe
+      fingers: 3
+      direction: right
+      actions:
+        - on: begin
+          plasma_shortcut: kwin,AppCycle Previous
+
+    # three fingers up: show all open windows (Mission Control / Exposé)
+    - type: swipe
+      fingers: 3
+      direction: up
+      actions:
+        - on: begin
+          plasma_shortcut: kwin,Expose
+
+    # three fingers down: windows of the current application only (App Exposé)
+    - type: swipe
+      fingers: 3
+      direction: down
+      actions:
+        - on: begin
+          plasma_shortcut: kwin,ExposeClass

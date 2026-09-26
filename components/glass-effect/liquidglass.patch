@@ -1,0 +1,60 @@
+--- a/src/effect.cpp
++++ b/src/effect.cpp
+@@ -1238,7 +1238,11 @@
+     // Maximized full-screen apps keep sharp corners unless the user
+     // opts in via RoundCornersOfMaximizedWindows.
+     const QMatrix4x4& colorMatrix = m_colorMatrix;
+-    const float modulation = opacity * opacity;
++    // Inactive windows are faded by the Translucency effect; keep their
++    // glass at full strength so they turn into frosted glass instead of a
++    // see-through ghost. Closing/animating windows still fade normally.
++    const bool steadyInactive = !w->isDeleted() && effects->activeWindow() != w;
++    const float modulation = steadyInactive ? 1.0f : opacity * opacity;
+ 
+     BorderRadius cornerRadius = w->window()->borderRadius();
+     float topCornerRadius = 0.0;
+@@ -1307,12 +1311,18 @@
+ 
+     const QVector2D halfpixel(0.5 / read->colorAttachment()->width(), 0.5 / read->colorAttachment()->height());
+ 
+-    const QRectF transformedRect = QRectF {
+-        w->frameGeometry().x() + data.xTranslation(),
+-        w->frameGeometry().y() + data.yTranslation(),
+-        w->frameGeometry().width() * data.xScale(),
+-        w->frameGeometry().height() * data.yScale(),
+-    };
++    // Undecorated surfaces (Plasma applet popups, menus, tooltips) ask for a
++    // blur region that is inset from their window geometry (shadow/margin
++    // area). Shape the glass to that region, otherwise it sticks out past
++    // the visible background and shows as a light rim at the corners.
++    const QRectF transformedRect = w->decoration()
++        ? QRectF {
++              w->frameGeometry().x() + data.xTranslation(),
++              w->frameGeometry().y() + data.yTranslation(),
++              w->frameGeometry().width() * data.xScale(),
++              w->frameGeometry().height() * data.yScale(),
++          }
++        : QRectF(backgroundRect);
+     // Floor to integer device pixels so the SDF rounded corners are always
+     // pixel-aligned — prevents subpixel border artifacts that shift with
+     // window position.
+--- a/src/shaders/glass.glsl
++++ b/src/shaders/glass.glsl
+@@ -68,6 +68,6 @@
+         col = lgApplyHighlight(col, inside, outNorm, highlightWidth, highlightStrength);
+     }
+ 
+-    float mask = 1.0 - smoothstep(-3.0, 0.0, d);
++    float mask = 1.0 - smoothstep(-1.0, 0.0, d); // crisp edge: a 3px fade let the unblurred backdrop show as a light rim
+     LG_OUT = vec4(col, mask) * colorMatrix * opacity;
+ }
+--- a/src/shaders/glass_core.glsl
++++ b/src/shaders/glass_core.glsl
+@@ -69,6 +69,6 @@
+         col = lgApplyHighlight(col, inside, outNorm, highlightWidth, highlightStrength);
+     }
+ 
+-    float mask = 1.0 - smoothstep(-3.0, 0.0, d);
++    float mask = 1.0 - smoothstep(-1.0, 0.0, d); // crisp edge: a 3px fade let the unblurred backdrop show as a light rim
+     LG_OUT = vec4(col, mask) * colorMatrix * opacity;
+ }

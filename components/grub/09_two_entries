@@ -1,0 +1,41 @@
+#!/bin/sh
+# Two-entry boot menu: Kubuntu (via /boot/vmlinuz symlinks, which the kernel
+# packages keep pointing at the newest kernel) and Windows. The stock
+# 10_linux / 30_os-prober / memtest / uefi / fwupd generators are disabled
+# (chmod -x). To restore the stock menu: chmod +x them and remove this file.
+set -e
+. /usr/share/grub/grub-mkconfig_lib
+
+ROOT_DEV=$(${grub_probe} --target=device /)
+ROOT_UUID=$(${grub_probe} --device "${ROOT_DEV}" --target=fs_uuid)
+PREPARE=$(prepare_grub_to_access_device "$(${grub_probe} --target=device /boot)" | sed 's/^/\t/')
+# Windows ESP: taken from os-prober (…@/efi/Microsoft/Boot/bootmgfw.efi:…:efi),
+# or set WIN_ESP_UUID in /etc/default/grub to override.
+if [ -z "${WIN_ESP_UUID}" ]; then
+    WIN_DEV=$(os-prober 2>/dev/null | grep -i "bootmgfw.efi" | head -1 | cut -d@ -f1)
+    [ -n "${WIN_DEV}" ] && WIN_ESP_UUID=$(${grub_probe} --device "${WIN_DEV}" --target=fs_uuid 2>/dev/null)
+fi
+
+cat <<EOF
+menuentry 'Kubuntu' --class kubuntu --class gnu-linux --class gnu --class os \$menuentry_id_option 'kubuntu' {
+	recordfail
+	load_video
+	set gfxpayload=keep
+	insmod gzio
+${PREPARE}
+	linux	/boot/vmlinuz root=UUID=${ROOT_UUID} ro ${GRUB_CMDLINE_LINUX} ${GRUB_CMDLINE_LINUX_DEFAULT}
+	initrd	/boot/initrd.img
+}
+EOF
+
+# No Windows found: Kubuntu entry only.
+[ -n "${WIN_ESP_UUID}" ] || exit 0
+
+cat <<EOF
+menuentry 'Windows' --class windows --class os \$menuentry_id_option 'windows' {
+	insmod part_gpt
+	insmod fat
+	search --no-floppy --fs-uuid --set=root ${WIN_ESP_UUID}
+	chainloader /efi/Microsoft/Boot/bootmgfw.efi
+}
+EOF

@@ -1,0 +1,15 @@
+{
+    "KPackageStructure": "KWin/Effect",
+    "KPlugin": {
+        "Authors": [{ "Name": "Plasma Glass contributors" }],
+        "Category": "Appearance",
+        "Description": "Slides the Guake drop-down terminal straight down from the top edge, like the Quake console",
+        "EnabledByDefault": false,
+        "Id": "quakeslide",
+        "License": "GPL",
+        "Name": "Quake Console Slide",
+        "Version": "1.0"
+    },
+    "X-Plasma-API": "javascript",
+    "X-Plasma-MainScript": "code/main.js"
+}

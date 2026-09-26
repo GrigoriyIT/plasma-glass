@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<kcfg xmlns="http://www.kde.org/standards/kcfg/1.0"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="http://www.kde.org/standards/kcfg/1.0 http://www.kde.org/standards/kcfg/1.0/kcfg.xsd">
+  <kcfgfile name=""/>
+  <group name="General">
+    <entry name="Image" type="String">
+      <default>file:///usr/share/wallpapers/ColdRipple/contents/images/2560x1600.jpg</default>
+    </entry>
+    <!-- Vertical position of the clock's center, percent of screen height -->
+    <entry name="VerticalPosition" type="Int">
+      <default>50</default>
+    </entry>
+    <entry name="ClockFont" type="String">
+      <default>SF Pro Display</default>
+    </entry>
+    <!-- QFont weight: 100 Thin, 200 Ultralight, 300 Light, 400 Regular, 500 Medium, 600 Semibold -->
+    <entry name="ClockWeight" type="Int">
+      <default>300</default>
+    </entry>
+    <entry name="ShowDate" type="Bool">
+      <default>true</default>
+    </entry>
+  </group>
+</kcfg>

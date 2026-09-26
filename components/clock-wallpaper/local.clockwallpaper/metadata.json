@@ -1,0 +1,15 @@
+{
+    "KPackageStructure": "Plasma/Wallpaper",
+    "KPlugin": {
+        "Authors": [{ "Name": "Plasma Glass contributors" }],
+        "Description": "Image wallpaper with a large centered clock",
+        "Description[ru]": "Картинка с крупными часами по центру",
+        "Icon": "preferences-system-time",
+        "Id": "local.clockwallpaper",
+        "License": "GPL-2.0-or-later",
+        "Name": "Clock Wallpaper",
+        "Name[ru]": "Обои с часами",
+        "Version": "1.0"
+    },
+    "X-Plasma-API-Minimum-Version": "6.0"
+}

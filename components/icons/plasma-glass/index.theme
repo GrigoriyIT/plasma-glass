@@ -1,0 +1,32 @@
+[Icon Theme]
+Name=Plasma Glass
+Comment=Breeze Dark system icons + Colloid app icons + own logo and launcher
+Inherits=breeze-dark,breeze,hicolor
+Directories=colloid-apps,scalable/places,scalable/apps
+
+# colloid-apps holds symlinks to Colloid app icons with reverse-DNS names
+# (org.kde.*, com.*...) plus a whitelist (systemsettings, google-chrome, code,
+# utilities-terminal...). Never link the whole Colloid apps dir: KDE falls
+# back battery-040 -> battery, kdeconnect-tray -> kdeconnect and would pick
+# Colloid's colored tiles for tray icons. (install Colloid first:
+# github.com/vinceliuice/Colloid-icon-theme, ./install.sh -s default -t default)
+[colloid-apps]
+Size=48
+MinSize=16
+MaxSize=512
+Type=Scalable
+Context=Applications
+
+[scalable/places]
+Size=16
+MinSize=8
+MaxSize=512
+Type=Scalable
+Context=Places
+
+[scalable/apps]
+Size=48
+MinSize=8
+MaxSize=512
+Type=Scalable
+Context=Applications

@@ -1,0 +1,6 @@
+[Unit]
+Description=Adapt top panel text color to the wallpaper
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/panel-adaptive-text

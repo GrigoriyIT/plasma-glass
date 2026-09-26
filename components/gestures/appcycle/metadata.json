@@ -1,0 +1,14 @@
+{
+    "KPackageStructure": "KWin/Script",
+    "KPlugin": {
+        "Authors": [{ "Name": "Plasma Glass contributors" }],
+        "Description": "Cycle through open application windows in a stable order (for touchpad gestures)",
+        "EnabledByDefault": false,
+        "Id": "appcycle",
+        "License": "GPL",
+        "Name": "App Cycle",
+        "Version": "1.0"
+    },
+    "X-Plasma-API": "javascript",
+    "X-Plasma-MainScript": "code/main.js"
+}

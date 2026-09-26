@@ -1,0 +1,21 @@
+@import 'colors.css';
+/* Guake tab bar: dark strip matching the console, readable labels */
+#notebook-teminals > header { border-radius: 0;
+    background-color: rgba(31, 31, 31, 0.92);
+    border: none;
+    box-shadow: none;
+}
+#notebook-teminals > header tab { border-radius: 0;
+    background-color: transparent;
+    color: #9a9a9a;
+    border: none;
+    box-shadow: none;
+    padding: 4px 12px;
+}
+#notebook-teminals > header tab label { color: #9a9a9a; }
+#notebook-teminals > header tab:checked {
+    background-color: rgba(255, 255, 255, 0.10);
+    border-radius: 0;
+}
+#notebook-teminals > header tab:checked label { color: #f0f0f0; }
+#notebook-teminals > header tab button { color: #9a9a9a; min-height: 16px; min-width: 16px; }

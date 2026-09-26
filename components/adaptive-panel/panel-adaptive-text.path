@@ -1,0 +1,8 @@
+[Unit]
+Description=Watch Plasma desktop config for wallpaper changes
+
+[Path]
+PathChanged=%h/.config/plasma-org.kde.plasma.desktop-appletsrc
+
+[Install]
+WantedBy=plasma-workspace.target
