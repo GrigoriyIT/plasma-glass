@@ -6,9 +6,10 @@
 
 [English version](README.md)
 
-![Док: тёмная стеклянная плитка лаунчера, значки Colloid, стеклянная корзина](docs/images/dock-combos.png)
+![Рабочий стол из матового стекла: активное окно Dolphin, неактивная Konsole за ним, адаптивная верхняя панель и док](docs/images/desktop.jpg)
 
-> Скриншоты всего рабочего стола появятся позже — см. [ROADMAP](docs/ROADMAP.md).
+| ![Меню программ с колонкой категорий](docs/images/launcher.jpg) | ![Выпадающий терминал Guake](docs/images/guake.jpg) |
+|---|---|
 
 ## Что внутри
 

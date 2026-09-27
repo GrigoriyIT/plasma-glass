@@ -6,9 +6,10 @@ gestures and a drop-down terminal.
 
 [Русская версия](README.ru.md)
 
-![The dock: dark glass launcher tile, Colloid app icons, glass trash](docs/images/dock-combos.png)
+![Frosted-glass desktop: active Dolphin window, inactive Konsole behind it, adaptive top bar and dock](docs/images/desktop.jpg)
 
-> Full-desktop screenshots are coming — see [ROADMAP](docs/ROADMAP.md).
+| ![Launcher with the category column](docs/images/launcher.jpg) | ![Drop-down Guake terminal](docs/images/guake.jpg) |
+|---|---|
 
 ## What you get
 

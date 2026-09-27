@@ -1,6 +1,6 @@
 # Roadmap
 
-- **Screenshots.** Full desktop, active vs. inactive windows, launcher, gestures (GIF).
+- **Screenshots.** Overview (Exposé) and a GIF of the gestures.
 - **One installer with rollback.** Every component, the settings from `reference/`
   and the theme SVG edits in one script that backs up what it changes.
 - **Theme SVG edits as a script** instead of the manual steps in TUNING.md.
