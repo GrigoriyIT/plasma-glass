@@ -81,6 +81,14 @@ grep -q "notebook-teminals" ~/.config/gtk-3.0/gtk.css || cat >> ~/.config/gtk-3.
 #notebook-teminals > header tab:checked { background-color: rgba(255, 255, 255, 0.10); border-radius: 0; }
 #notebook-teminals > header tab:checked label { color: #f0f0f0; }
 #notebook-teminals > header tab button { color: #9a9a9a; min-height: 16px; min-width: 16px; }
+/* as tall as its text */
+#notebook-teminals > header { padding: 0; min-height: 0; }
+#notebook-teminals > header tabs { margin: 0; padding: 0; min-height: 0; }
+#notebook-teminals > header tab { padding: 1px 10px; min-height: 0; margin: 0; }
+#notebook-teminals > header tab label { padding: 0; margin: 0; min-height: 0; }
+#notebook-teminals > header tab button,
+#notebook-teminals > header button { padding: 0 2px; margin: 0; min-height: 14px; min-width: 14px; }
+#notebook-teminals > header button image { -gtk-icon-transform: scale(0.8); }
 CSS
 
 qdbus6 org.kde.KWin /KWin reconfigure
