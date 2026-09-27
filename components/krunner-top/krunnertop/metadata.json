@@ -1,0 +1,14 @@
+{
+    "KPackageStructure": "KWin/Script",
+    "KPlugin": {
+        "Authors": [{ "Name": "Plasma Glass contributors" }],
+        "Description": "Keeps the free-floating KRunner near the top of the screen",
+        "EnabledByDefault": false,
+        "Id": "krunnertop",
+        "License": "GPL",
+        "Name": "KRunner at Top",
+        "Version": "1.0"
+    },
+    "X-Plasma-API": "javascript",
+    "X-Plasma-MainScript": "code/main.js"
+}

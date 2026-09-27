@@ -145,7 +145,24 @@ F12 is registered as a KDE global shortcut. On HP laptops the top row may send
 media keys; set the key in *System Settings → Shortcuts → Guake Toggle* if F12
 does nothing.
 
-## 10. Chrome font-cache fix
+## 10. KRunner near the top with rounded corners
+
+A KRunner docked to the top edge has no top frame, so its top corners are square.
+Make it free-floating (full frame) and pin it just below the panel:
+
+```bash
+kwriteconfig6 --file krunnerrc --group General --key FreeFloating true
+kpackagetool6 --type KWin/Script -i components/krunner-top/krunnertop
+kwriteconfig6 --file kwinrc --group Plugins --key krunnertopEnabled true
+kwriteconfig6 --file kwinrc --group Effect-liquidglass --key WindowClasses krunner
+kwriteconfig6 --file kwinrc --group Round-Corners --key Exclusions "plasmashell,org.kde.plasmashell,krunner,org.kde.krunner"
+qdbus6 org.kde.KWin /KWin reconfigure
+```
+
+KRunner is excluded from the glass effect: its glass comes out ~2 px larger than its
+frame and doubles the corner line.
+
+## 11. Chrome font-cache fix
 
 Only if you use Google Chrome 154 or newer.
 
@@ -153,7 +170,7 @@ Only if you use Google Chrome 154 or newer.
 components/chrome-fontconfig-fix/install.sh
 ```
 
-## 11. Two-entry boot menu (optional)
+## 12. Two-entry boot menu (optional)
 
 ```bash
 sudo install -m 755 components/grub/09_two_entries /etc/grub.d/09_two_entries

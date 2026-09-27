@@ -18,7 +18,7 @@ edge at slightly different radii, the corner looks doubled or shows a light gap.
 | Rounded Corners | `OutlineThickness`, `InactiveOutlineThickness` | 1 |
 | Rounded Corners | `OutlineColor` / alpha | white, 50 active / 28 inactive |
 | Rounded Corners | second and outer outlines | 0 |
-| Rounded Corners | `Exclusions` | `plasmashell,org.kde.plasmashell` |
+| Rounded Corners | `Exclusions` | `plasmashell,org.kde.plasmashell,krunner,org.kde.krunner` |
 | Aurorae decoration | top corner arcs | 3 px (clipping is left to Rounded Corners) |
 
 Why 11 and not smaller: Plasma applet popups (battery, calendar…) use the theme's
@@ -69,7 +69,8 @@ original.
      `opacity:0.2;fill:#ffffff` — a light hairline that matches the windows.
      Do not hide them: without them a light ring of blurred glass shows around
      popups.
-3. **Tooltips** (`widgets/tooltip.svgz`): `opacity:0.55;fill:#ffffff` → `opacity:0.2;fill:#ffffff`.
+3. **Popup shadow** (`dialogs/background.svgz`): solid shadow pieces `path962` and `rect986` (`opacity:0.55;fill:#2a2a2a`) → `opacity:0`. They drew a hard dark square outside every popup's rounded frame; the soft gradient shadow stays.
+4. **Tooltips** (`widgets/tooltip.svgz`): `opacity:0.55;fill:#ffffff` → `opacity:0.2;fill:#ffffff`.
 
 After an Aurorae change, switch the decoration to Breeze and back; after a Plasma
 theme change, delete `~/.cache/plasma_theme_*.kcache` and restart plasmashell.
