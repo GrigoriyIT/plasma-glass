@@ -1,10 +1,16 @@
 #!/usr/bin/env python3
-"""Glass VPN — a small tray client for VLESS subscriptions on top of sing-box.
+"""Glass VPN — a small tray client for VLESS subscriptions.
 
 Blocked resources go through the VPN; the local network and Russian sites
-(.ru/.рф/.su, geosite-category-ru, geoip-ru) go direct. sing-box runs as a
-child process in TUN mode; the binary needs cap_net_admin (see install.sh),
-so nothing here runs as root.
+(.ru/.рф/.su, geosite-category-ru, geoip-ru) go direct.
+
+Two child processes:
+- Xray-core speaks VLESS to the server (it supports everything current
+  providers use: VLESS Encryption mlkem768x25519, Reality, gRPC, XHTTP) and
+  exposes a SOCKS5 proxy on 127.0.0.1 only;
+- sing-box owns the system-wide TUN and the routing, sending "proxy" traffic
+  to that SOCKS port. Its binary gets cap_net_admin (see install.sh), so
+  nothing here runs as root.
 """
 import base64
 import json
@@ -33,6 +39,10 @@ SERVERS = CONFIG_DIR / "servers.json"
 SB_CONFIG = STATE_DIR / "sing-box.json"
 SB_LOG = STATE_DIR / "sing-box.log"
 SING_BOX = os.environ.get("GLASSVPN_SING_BOX", "/usr/local/bin/sing-box")
+XRAY = os.environ.get("GLASSVPN_XRAY", "/usr/local/bin/xray")
+XRAY_CONFIG = STATE_DIR / "xray.json"
+XRAY_LOG = STATE_DIR / "xray.log"
+SOCKS_PORT = 10808
 AUTOSTART = Path.home() / ".config/autostart/glassvpn.desktop"
 
 RULESET_URL = {
@@ -85,6 +95,9 @@ def parse_vless(uri):
         "host_header": q.get("host", ""),
         "service_name": q.get("serviceName", ""),
         "alpn": q.get("alpn", ""),
+        "encryption": q.get("encryption", "none"),
+        "mode": q.get("mode", ""),
+        "spx": q.get("spx", ""),
     }
 
 
@@ -108,32 +121,37 @@ def fetch_subscription(url):
 
 # ------------------------------------------------------- sing-box config --
 
-def outbound_for(s):
-    o = {"type": "vless", "tag": "proxy", "server": s["host"], "server_port": int(s["port"]),
-         "uuid": s["uuid"], "packet_encoding": "xudp", "domain_resolver": "local"}
+def xray_config(s, server_ip):
+    """Xray client: SOCKS5 on localhost -> VLESS to the server."""
+    user = {"id": s["uuid"], "encryption": s.get("encryption") or "none"}
     if s["flow"]:
-        o["flow"] = s["flow"]
-    if s["security"] in ("tls", "reality"):
-        tls = {"enabled": True, "server_name": s["sni"] or s["host"],
-               "utls": {"enabled": True, "fingerprint": s["fp"] or "chrome"}}
-        if s["alpn"]:
-            tls["alpn"] = s["alpn"].split(",")
-        if s["security"] == "reality":
-            tls["reality"] = {"enabled": True, "public_key": s["pbk"], "short_id": s["sid"]}
-        o["tls"] = tls
-    t = s["type"]
-    if t == "grpc":
-        o["transport"] = {"type": "grpc", "service_name": s["service_name"]}
-    elif t == "ws":
-        o["transport"] = {"type": "ws", "path": s["path"] or "/",
-                          **({"headers": {"Host": s["host_header"]}} if s["host_header"] else {})}
-    elif t == "httpupgrade":
-        o["transport"] = {"type": "httpupgrade", "path": s["path"] or "/",
-                          **({"host": s["host_header"]} if s["host_header"] else {})}
-    elif t in ("http", "h2"):
-        o["transport"] = {"type": "http", "path": s["path"] or "/",
-                          **({"host": [s["host_header"]]} if s["host_header"] else {})}
-    return o
+        user["flow"] = s["flow"]
+    net = {"tcp": "tcp", "raw": "tcp", "grpc": "grpc", "ws": "ws", "httpupgrade": "httpupgrade",
+           "xhttp": "xhttp", "splithttp": "xhttp", "http": "xhttp", "h2": "xhttp"}.get(s["type"], "tcp")
+    stream = {"network": net, "security": s["security"] if s["security"] in ("tls", "reality") else "none"}
+    if stream["security"] == "tls":
+        stream["tlsSettings"] = {"serverName": s["sni"] or s["host"], "fingerprint": s["fp"] or "chrome",
+                                 **({"alpn": s["alpn"].split(",")} if s["alpn"] else {})}
+    elif stream["security"] == "reality":
+        stream["realitySettings"] = {"serverName": s["sni"], "fingerprint": s["fp"] or "chrome",
+                                     "publicKey": s["pbk"], "shortId": s["sid"], "spiderX": s.get("spx", "")}
+    if net == "grpc":
+        stream["grpcSettings"] = {"serviceName": s["service_name"]}
+    elif net == "ws":
+        stream["wsSettings"] = {"path": s["path"] or "/", **({"headers": {"Host": s["host_header"]}} if s["host_header"] else {})}
+    elif net == "httpupgrade":
+        stream["httpupgradeSettings"] = {"path": s["path"] or "/", "host": s["host_header"]}
+    elif net == "xhttp":
+        stream["xhttpSettings"] = {"path": s["path"] or "/", "host": s["host_header"], "mode": s.get("mode") or "auto"}
+    return {
+        "log": {"loglevel": "warning", "error": str(XRAY_LOG), "access": "none"},
+        "inbounds": [{"listen": "127.0.0.1", "port": SOCKS_PORT, "protocol": "socks",
+                      "settings": {"udp": True, "auth": "noauth"}}],
+        "outbounds": [{"protocol": "vless", "tag": "proxy",
+                       "settings": {"vnext": [{"address": server_ip or s["host"], "port": int(s["port"]),
+                                               "users": [user]}]},
+                       "streamSettings": stream}],
+    }
 
 
 def build_config(server, direct_hosts):
@@ -150,16 +168,22 @@ def build_config(server, direct_hosts):
                 {**ru, "server": "local"},
             ],
             "final": "remote",
-            "strategy": "prefer_ipv4",
+            "strategy": "ipv4_only",  # most home networks here have no IPv6
         },
         "inbounds": [{
             "type": "tun", "tag": "tun-in", "interface_name": "glassvpn0",
-            "address": ["198.18.0.1/30", "fdfe:dcba:9876::1/126"],
+            # IPv4 only: with an IPv6 address the tunnel would swallow AAAA traffic
+            # that has nowhere to go on networks without IPv6
+            "address": ["198.18.0.1/30"],
             "mtu": 9000, "auto_route": True, "strict_route": True, "stack": "mixed",
+            # Xray reaches the VPN server over the physical link, not through the tunnel
             # LAN, Docker bridges, the PPTP home gateway and the VPN server stay outside
             "route_exclude_address": PRIVATE_NETS + [f"{h}/32" for h in direct_hosts],
         }],
-        "outbounds": [outbound_for(server), {"type": "direct", "tag": "direct"}],
+        "outbounds": [
+            {"type": "socks", "tag": "proxy", "server": "127.0.0.1", "server_port": SOCKS_PORT, "version": "5"},
+            {"type": "direct", "tag": "direct"},
+        ],
         "route": {
             "rules": [
                 {"action": "sniff"},
@@ -236,6 +260,7 @@ class Tray:
         self.settings = load(SETTINGS, {"subscriptions": [], "selected": None, "autoconnect": True})
         self.servers = load(SERVERS, [])
         self.proc = None
+        self.xray = None
         self.want_up = False
         self.latencies = {}
         self.tray = QSystemTrayIcon(self.icon(False))
@@ -299,7 +324,7 @@ class Tray:
         ac.setCheckable(True)
         ac.setChecked(AUTOSTART.exists() and self.settings.get("autoconnect", True))
         ac.toggled.connect(self.set_autostart)
-        m.addAction("Журнал").triggered.connect(lambda: subprocess.Popen(["xdg-open", str(SB_LOG)]))
+        m.addAction("Журнал").triggered.connect(lambda: subprocess.Popen(["xdg-open", str(XRAY_LOG)]))
         m.addSeparator()
         m.addAction("Выход").triggered.connect(self.quit)
         self.tray.setIcon(self.icon(up))
@@ -384,7 +409,8 @@ class Tray:
 
     # ---- sing-box process
     def is_up(self):
-        return self.proc is not None and self.proc.poll() is None
+        return (self.proc is not None and self.proc.poll() is None
+                and self.xray is not None and self.xray.poll() is None)
 
     def connect(self):
         s = self.current()
@@ -393,13 +419,18 @@ class Tray:
             return
         STATE_DIR.mkdir(parents=True, exist_ok=True)
         CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        direct = pptp_gateways() + resolve(s["host"])
+        server_ips = resolve(s["host"])
+        direct = pptp_gateways() + server_ips
+        save(XRAY_CONFIG, xray_config(s, server_ips[0] if server_ips else None))
         save(SB_CONFIG, build_config(s, direct))
-        check = subprocess.run([SING_BOX, "check", "-c", str(SB_CONFIG)], capture_output=True, text=True)
-        if check.returncode != 0:
-            self.notify("Glass VPN", "Ошибка конфигурации: " + (check.stderr or check.stdout)[-200:])
-            return
+        for cmd in ([XRAY, "run", "-test", "-c", str(XRAY_CONFIG)], [SING_BOX, "check", "-c", str(SB_CONFIG)]):
+            check = subprocess.run(cmd, capture_output=True, text=True)
+            if check.returncode != 0:
+                self.notify("Glass VPN", "Ошибка конфигурации: " + (check.stderr or check.stdout)[-200:])
+                return
         self.stop_process()
+        self.xray = subprocess.Popen([XRAY, "run", "-c", str(XRAY_CONFIG)],
+                                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         self.proc = subprocess.Popen([SING_BOX, "run", "-c", str(SB_CONFIG)],
                                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         self.want_up = True
@@ -413,13 +444,14 @@ class Tray:
         self.rebuild_menu()
 
     def stop_process(self):
-        if self.proc and self.proc.poll() is None:
-            self.proc.send_signal(signal.SIGTERM)
-            try:
-                self.proc.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                self.proc.kill()
-        self.proc = None
+        for p in (self.proc, self.xray):
+            if p and p.poll() is None:
+                p.send_signal(signal.SIGTERM)
+                try:
+                    p.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    p.kill()
+        self.proc = self.xray = None
 
     def check_process(self):
         # restart sing-box if it died while the user wants the VPN up

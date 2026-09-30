@@ -1,5 +1,5 @@
 #!/bin/bash
-# Install Glass VPN: sing-box (with TUN capabilities) + the tray client.
+# Install Glass VPN: Xray-core (VLESS) + sing-box (TUN, with capabilities) + the tray client.
 set -e
 HERE=$(cd "$(dirname "$0")" && pwd)
 
@@ -11,6 +11,15 @@ if ! command -v sing-box >/dev/null; then
     curl -fsSL -o "$TMP/sb.tgz" "https://github.com/SagerNet/sing-box/releases/download/$TAG/sing-box-$V-linux-amd64.tar.gz"
     tar xzf "$TMP/sb.tgz" -C "$TMP"
     sudo install -m 755 "$TMP/sing-box-$V-linux-amd64/sing-box" /usr/local/bin/sing-box
+    rm -rf "$TMP"
+fi
+if ! command -v xray >/dev/null; then
+    TAG=$(curl -fsSL https://api.github.com/repos/XTLS/Xray-core/releases/latest |
+          python3 -c "import sys,json;print(json.load(sys.stdin)['tag_name'])")
+    TMP=$(mktemp -d)
+    curl -fsSL -o "$TMP/xray.zip" "https://github.com/XTLS/Xray-core/releases/download/$TAG/Xray-linux-64.zip"
+    python3 -c "import zipfile,sys; zipfile.ZipFile(sys.argv[1]).extract('xray', sys.argv[2])" "$TMP/xray.zip" "$TMP"
+    sudo install -m 755 "$TMP/xray" /usr/local/bin/xray
     rm -rf "$TMP"
 fi
 # TUN without running anything as root
