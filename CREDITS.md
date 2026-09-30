@@ -18,7 +18,8 @@ except where a file below says it is derived from one of them.
 - `components/glass-effect/liquidglass.patch` — changes to MacTahoe's *liquidglass* effect (GPL-3.0).
 - `components/launcher/*.qml` — modified copies of MacTahoe's launcher plasmoid (GPL-3.0).
 - `components/icons/plasma-glass/scalable/places/start-here-kde-symbolic.svg` — Breeze icon (LGPL-3.0).
-- `components/icons/plasma-glass/scalable/places/user-trash*.svg`, `components/icons/extras/trash-tahoe*.svg`, `components/icons/extras/launcher-tahoe.svg` — MacTahoe icons (GPL-3.0).
+- `components/icons/plasma-glass/tray/places/user-trash*.svg` — Breeze icons (LGPL-3.0).
+- `components/icons/plasma-glass/dock/places/user-trash*.svg`, `components/icons/extras/trash-tahoe*.svg`, `components/icons/extras/launcher-tahoe.svg` — MacTahoe icons (GPL-3.0).
 - `components/icons/extras/trash-colloid*.svg`, `components/icons/extras/launcher-plasma-colloid.svg` — Colloid icons (GPL-3.0).
 
 Everything else is original to this project.

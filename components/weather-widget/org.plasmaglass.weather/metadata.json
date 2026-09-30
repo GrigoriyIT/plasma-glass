@@ -1,0 +1,17 @@
+{
+    "KPackageStructure": "Plasma/Applet",
+    "KPlugin": {
+        "Authors": [{ "Name": "Plasma Glass contributors" }],
+        "Category": "Environment and Weather",
+        "Description": "Current weather, next hours and days (MET Norway forecast)",
+        "Description[ru]": "Погода сейчас, по часам и по дням (прогноз MET Norway)",
+        "FormFactors": ["desktop"],
+        "Icon": "weather-few-clouds",
+        "Id": "org.plasmaglass.weather",
+        "License": "GPL-3.0-or-later",
+        "Name": "Weather",
+        "Name[ru]": "Погода",
+        "Version": "1.0"
+    },
+    "X-Plasma-API-Minimum-Version": "6.0"
+}

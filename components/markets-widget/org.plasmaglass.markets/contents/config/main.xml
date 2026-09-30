@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<kcfg xmlns="http://www.kde.org/standards/kcfg/1.0"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="http://www.kde.org/standards/kcfg/1.0 http://www.kde.org/standards/kcfg/1.0/kcfg.xsd">
+  <kcfgfile name=""/>
+  <group name="General">
+    <entry name="range" type="String">
+      <label>Chart range: day, week or month</label>
+      <default>day</default>
+    </entry>
+    <entry name="alertSensitivity" type="Double">
+      <label>Multiplier for the sharp-move thresholds (0.5 = twice as sensitive)</label>
+      <default>1.0</default>
+    </entry>
+    <entry name="notify" type="Bool">
+      <label>Send a desktop notification on a sharp move</label>
+      <default>true</default>
+    </entry>
+  </group>
+</kcfg>

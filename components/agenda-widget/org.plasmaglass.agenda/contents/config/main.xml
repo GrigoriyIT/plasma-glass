@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<kcfg xmlns="http://www.kde.org/standards/kcfg/1.0"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="http://www.kde.org/standards/kcfg/1.0 http://www.kde.org/standards/kcfg/1.0/kcfg.xsd">
+  <kcfgfile name=""/>
+  <group name="General">
+    <entry name="icsUrls" type="String">
+      <label>iCal links, one per line</label>
+      <default></default>
+    </entry>
+    <entry name="days" type="Int">
+      <label>How many days ahead to show</label>
+      <default>7</default>
+    </entry>
+  </group>
+</kcfg>

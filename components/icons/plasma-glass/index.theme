@@ -2,7 +2,7 @@
 Name=Plasma Glass
 Comment=Breeze Dark system icons + Colloid app icons + own logo and launcher
 Inherits=breeze-dark,breeze,hicolor
-Directories=colloid-apps,scalable/places,scalable/apps
+Directories=tray/places,dock/places,colloid-apps,scalable/places,scalable/apps
 
 # colloid-apps holds symlinks to Colloid app icons with reverse-DNS names
 # (org.kde.*, com.*...) plus a whitelist (systemsettings, google-chrome, code,
@@ -30,3 +30,19 @@ MinSize=8
 MaxSize=512
 Type=Scalable
 Context=Applications
+
+# Glass trash only at dock sizes
+[dock/places]
+Size=48
+MinSize=33
+MaxSize=512
+Type=Scalable
+Context=Places
+
+# Monochrome Breeze trash for the panel/tray (recolored by the adaptive bar)
+[tray/places]
+Size=22
+MinSize=8
+MaxSize=32
+Type=Scalable
+Context=Places

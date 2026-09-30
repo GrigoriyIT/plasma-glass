@@ -1,0 +1,17 @@
+{
+    "KPackageStructure": "Plasma/Applet",
+    "KPlugin": {
+        "Authors": [{ "Name": "Plasma Glass contributors" }],
+        "Category": "Online Services",
+        "Description": "Intraday charts: USD, EUR and CNY to RUB (MOEX vs Bank of Russia) and Brent",
+        "Description[ru]": "Дневные графики: доллар, евро и юань к рублю (биржа и ЦБ), нефть Brent",
+        "FormFactors": ["desktop"],
+        "Icon": "office-chart-line",
+        "Id": "org.plasmaglass.markets",
+        "License": "GPL-3.0-or-later",
+        "Name": "Markets",
+        "Name[ru]": "Курсы и нефть",
+        "Version": "1.0"
+    },
+    "X-Plasma-API-Minimum-Version": "6.0"
+}

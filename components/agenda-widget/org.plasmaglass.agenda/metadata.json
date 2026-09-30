@@ -1,0 +1,17 @@
+{
+    "KPackageStructure": "Plasma/Applet",
+    "KPlugin": {
+        "Authors": [{ "Name": "Plasma Glass contributors" }],
+        "Category": "Date and Time",
+        "Description": "Upcoming events from iCal (.ics) calendar links",
+        "Description[ru]": "Ближайшие события из календарей по ссылке iCal (.ics)",
+        "FormFactors": ["desktop"],
+        "Icon": "view-calendar-agenda",
+        "Id": "org.plasmaglass.agenda",
+        "License": "GPL-3.0-or-later",
+        "Name": "Agenda",
+        "Name[ru]": "Повестка",
+        "Version": "1.0"
+    },
+    "X-Plasma-API-Minimum-Version": "6.0"
+}
