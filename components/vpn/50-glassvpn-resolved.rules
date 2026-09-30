@@ -1,0 +1,21 @@
+// Glass VPN: sing-box sets the DNS of its TUN link through systemd-resolved
+// on every connect and reverts it on disconnect. Without this rule each of
+// those calls asks for the password. Only the per-link DNS actions of
+// resolved are allowed, only for local active sessions of admin users.
+polkit.addRule(function (action, subject) {
+    var allowed = [
+        "org.freedesktop.resolve1.set-dns-servers",
+        "org.freedesktop.resolve1.set-domains",
+        "org.freedesktop.resolve1.set-default-route",
+        "org.freedesktop.resolve1.set-llmnr",
+        "org.freedesktop.resolve1.set-mdns",
+        "org.freedesktop.resolve1.set-dnssec",
+        "org.freedesktop.resolve1.set-dns-over-tls",
+        "org.freedesktop.resolve1.set-dnssec-negative-trust-anchors",
+        "org.freedesktop.resolve1.revert"
+    ];
+    if (allowed.indexOf(action.id) >= 0 && subject.local && subject.active &&
+        subject.isInGroup("sudo")) {
+        return polkit.Result.YES;
+    }
+});

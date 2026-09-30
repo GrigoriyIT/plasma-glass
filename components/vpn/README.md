@@ -19,3 +19,8 @@ in `~/.local/state/glassvpn/`.
 ```bash
 components/vpn/install.sh
 ```
+
+`install.sh` also installs a polkit rule (`50-glassvpn-resolved.rules`): sing-box sets the
+DNS of its TUN link through systemd-resolved on every connect and reverts it on disconnect,
+and without the rule each of those calls asks for the password. It allows only resolved's
+per-link DNS actions, only for local active sessions of users in the `sudo` group.

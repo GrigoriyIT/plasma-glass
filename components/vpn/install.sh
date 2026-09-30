@@ -25,6 +25,10 @@ fi
 # TUN without running anything as root
 sudo setcap cap_net_admin,cap_net_bind_service,cap_net_raw=+ep "$(command -v sing-box)"
 
+# sing-box sets the TUN link's DNS via systemd-resolved; without this rule
+# every connect/disconnect asks for the password
+sudo install -m 644 "$HERE/50-glassvpn-resolved.rules" /etc/polkit-1/rules.d/50-glassvpn-resolved.rules
+
 install -Dm 755 "$HERE/glassvpn.py" ~/.local/bin/glassvpn
 install -Dm 644 "$HERE/glassvpn.desktop" ~/.local/share/applications/glassvpn.desktop
 install -Dm 644 "$HERE/glassvpn.desktop" ~/.config/autostart/glassvpn.desktop
