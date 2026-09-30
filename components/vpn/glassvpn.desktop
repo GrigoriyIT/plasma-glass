@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Glass VPN
+Comment=VLESS VPN: blocked sites through the tunnel, Russian sites and LAN direct
+Exec=glassvpn
+Icon=network-vpn
+Categories=Network;
+StartupNotify=false
+X-GNOME-Autostart-enabled=true

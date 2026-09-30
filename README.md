@@ -59,6 +59,7 @@ KWin upgrade.
 | [`components/gestures`](components/gestures) | Touchpad gestures (InputActions config + *App Cycle* KWin script) |
 | [`components/guake`](components/guake) | Drop-down Guake with a vertical slide effect |
 | [`components/chrome-fontconfig-fix`](components/chrome-fontconfig-fix) | Keeps Chrome from breaking the system font cache |
+| [`components/vpn`](components/vpn) | *Glass VPN*: tray client for VLESS subscriptions on sing-box, Russian sites and LAN direct |
 | [`components/grub`](components/grub) | Boot menu with exactly two entries: Kubuntu and Windows |
 | [`reference`](reference) | The exact KWin, Kvantum and colour settings of the tuned system |
 

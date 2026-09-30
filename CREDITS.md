@@ -10,6 +10,7 @@ except where a file below says it is derived from one of them.
 | [Breeze icons](https://invent.kde.org/frameworks/breeze-icons) by KDE | LGPL-3.0 | System and tray icons, the Plasma logo used for the global menu |
 | [InputActions](https://github.com/InputActions/kwin) by taj-ny | GPL-3.0 | Touchpad gesture plugin for KWin |
 | [KDE Rounded Corners](https://github.com/matinlotfali/KDE-Rounded-Corners) by Matin Lotfaliei | GPL-3.0 | Corner clipping and the 1 px window outline (installed by MacTahoe) |
+| [sing-box](https://github.com/SagerNet/sing-box) by SagerNet | GPL-3.0-or-later | VPN core for Glass VPN (downloaded by its installer) |
 | [Guake](https://github.com/Guake/guake) | GPL-2.0-or-later | Drop-down terminal |
 | [Panel Colorizer](https://github.com/luisbocanegra/plasma-panel-colorizer) by Luis Bocanegra | GPL-3.0 | Top bar transparency and recolouring (installed by MacTahoe) |
 
