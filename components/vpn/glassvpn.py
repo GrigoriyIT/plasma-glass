@@ -25,8 +25,9 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-from PyQt6.QtCore import QObject, QTimer, pyqtSignal
-from PyQt6.QtGui import QAction, QActionGroup, QIcon
+from PyQt6.QtCore import QObject, QPointF, QRectF, Qt, QTimer, pyqtSignal
+from PyQt6.QtGui import (QAction, QActionGroup, QColor, QIcon, QPainter, QPainterPath,
+                         QPen, QPixmap)
 from PyQt6.QtWidgets import (QApplication, QInputDialog, QMenu, QMessageBox,
                              QSystemTrayIcon)
 
@@ -44,6 +45,14 @@ XRAY_CONFIG = STATE_DIR / "xray.json"
 XRAY_LOG = STATE_DIR / "xray.log"
 SOCKS_PORT = 10808
 AUTOSTART = Path.home() / ".config/autostart/glassvpn.desktop"
+APPLETSRC = Path.home() / ".config/plasma-org.kde.plasma.desktop-appletsrc"
+TUN = "glassvpn0"
+PROBE_HOST, PROBE_PORT = "www.google.com", 443   # reachable only through the tunnel
+
+# tray states
+OFF, CONNECTING, ON, ERROR = "off", "connecting", "on", "error"
+STATE_COLOR = {CONNECTING: "#f5b83d", ON: "#34c759", ERROR: "#ff453a"}
+STATE_TEXT = {OFF: "отключено", CONNECTING: "подключение…", ON: "подключено", ERROR: "сервер не отвечает"}
 
 RULESET_URL = {
     "geosite-ru": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-category-ru.srs",
@@ -242,12 +251,118 @@ def tcp_latency(host, port, timeout=3.0):
         return None
 
 
+def socks_probe(host, port, timeout=6.0):
+    """Open host:port through Xray's SOCKS5; returns milliseconds or None."""
+    t = time.monotonic()
+    try:
+        with socket.create_connection(("127.0.0.1", SOCKS_PORT), timeout=timeout) as c:
+            c.settimeout(timeout)
+            c.sendall(b"\x05\x01\x00")
+            if c.recv(2) != b"\x05\x00":
+                return None
+            h = host.encode()
+            c.sendall(b"\x05\x01\x00\x03" + bytes([len(h)]) + h + int(port).to_bytes(2, "big"))
+            reply = c.recv(10)
+            if len(reply) < 2 or reply[1] != 0:
+                return None
+            return int((time.monotonic() - t) * 1000)
+    except OSError:
+        return None
+
+
+def tun_bytes():
+    base = Path("/sys/class/net") / TUN / "statistics"
+    try:
+        return int((base / "rx_bytes").read_text()), int((base / "tx_bytes").read_text())
+    except (OSError, ValueError):
+        return None
+
+
+def human_rate(bps):
+    for unit in ("Б/с", "КБ/с", "МБ/с"):
+        if bps < 1024 or unit == "МБ/с":
+            return f"{bps:.0f} {unit}" if unit == "Б/с" else f"{bps:.1f} {unit}"
+        bps /= 1024
+
+
+def panel_text_color():
+    """Colour the adaptive top bar currently uses for text, so the shield matches it."""
+    try:
+        import configparser
+        cp = configparser.RawConfigParser(strict=False, interpolation=None)
+        cp.optionxform = str
+        cp.read(APPLETSRC, encoding="utf-8")
+        for sec in cp.sections():
+            if cp.get(sec, "plugin", fallback="") == "luisbocanegra.panel.colorizer":
+                g = json.loads(cp.get(f"{sec}][Configuration][General", "globalSettings"))
+                fg = g["widgets"]["normal"]["foregroundColor"]
+                if fg.get("enabled") and fg.get("custom"):
+                    return QColor(fg["custom"])
+    except Exception:
+        pass
+    return QColor("#ffffff")
+
+
+def draw_icon(state, fg, phase=0.0):
+    """Shield in the panel's text colour; a coloured status dot in the corner."""
+    size = 64
+    pm = QPixmap(size, size)
+    pm.fill(Qt.GlobalColor.transparent)
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.RenderHint.Antialiasing)
+    shield = QPainterPath()
+    shield.moveTo(30, 5)
+    shield.cubicTo(38, 10, 46, 12, 54, 12)
+    shield.lineTo(54, 30)
+    shield.cubicTo(54, 45, 44, 54, 30, 60)
+    shield.cubicTo(16, 54, 6, 45, 6, 30)
+    shield.lineTo(6, 12)
+    shield.cubicTo(14, 12, 22, 10, 30, 5)
+    shield.closeSubpath()
+    if state == ON:
+        p.fillPath(shield, fg)
+        # check mark knocked out of the filled shield
+        p.setCompositionMode(QPainter.CompositionMode.CompositionMode_Clear)
+        pen = QPen(Qt.GlobalColor.black, 6, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin)
+        p.setPen(pen)
+        tick = QPainterPath(QPointF(19, 32))
+        tick.lineTo(27, 40)
+        tick.lineTo(42, 24)
+        p.drawPath(tick)
+        p.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceOver)
+    else:
+        c = QColor(fg)
+        if state == OFF:
+            c.setAlphaF(0.55)
+        p.setPen(QPen(c, 5, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.drawPath(shield)
+        if state == ERROR:
+            p.drawLine(QPointF(30, 20), QPointF(30, 35))
+            p.drawPoint(QPointF(30, 44))
+    if state in STATE_COLOR:
+        dot = QColor(STATE_COLOR[state])
+        if state == CONNECTING:
+            dot.setAlphaF(0.45 + 0.55 * abs(phase))
+        r = 14
+        p.setCompositionMode(QPainter.CompositionMode.CompositionMode_Clear)
+        p.setBrush(Qt.GlobalColor.black)
+        p.setPen(Qt.PenStyle.NoPen)
+        p.drawEllipse(QPointF(size - r - 1, size - r - 1), r + 3, r + 3)
+        p.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceOver)
+        p.setBrush(dot)
+        p.drawEllipse(QPointF(size - r - 1, size - r - 1), r, r)
+    p.end()
+    return QIcon(pm)
+
+
 # ------------------------------------------------------------------ tray --
 
 class Signals(QObject):
     servers_changed = pyqtSignal()
     message = pyqtSignal(str, str)
     latency = pyqtSignal(dict)
+    probed = pyqtSignal(object)
 
 
 class Tray:
@@ -257,13 +372,22 @@ class Tray:
         self.sig.servers_changed.connect(self.rebuild_menu)
         self.sig.message.connect(self.notify)
         self.sig.latency.connect(self.show_latency)
+        self.sig.probed.connect(self.on_probe)
+        self.state = OFF
+        self.fg = panel_text_color()
+        self.phase = 0.0
+        self.probe_ms = None
+        self.probing = False
+        self.fails = 0
+        self.last_bytes = None
+        self.rates = (0.0, 0.0)
         self.settings = load(SETTINGS, {"subscriptions": [], "selected": None, "autoconnect": True})
         self.servers = load(SERVERS, [])
         self.proc = None
         self.xray = None
         self.want_up = False
         self.latencies = {}
-        self.tray = QSystemTrayIcon(self.icon(False))
+        self.tray = QSystemTrayIcon(draw_icon(OFF, self.fg))
         self.tray.setToolTip("Glass VPN")
         self.tray.activated.connect(self.on_click)
         self.menu = QMenu()
@@ -272,14 +396,71 @@ class Tray:
         self.tray.show()
         self.watchdog = QTimer(interval=3000, timeout=self.check_process)
         self.watchdog.start()
+        self.ticker = QTimer(interval=2000, timeout=self.tick)       # traffic, colour, probe
+        self.ticker.start()
+        self.pulse = QTimer(interval=120, timeout=self.animate)      # connecting blink
+        self.pulse.start()
         if self.settings.get("autoconnect") and self.current():
             QTimer.singleShot(1500, self.connect)
         QTimer.singleShot(4000, lambda: self.update_subscriptions(quiet=True))
 
     # icons: monochrome symbolic icons so the adaptive top bar recolors them
-    def icon(self, up):
-        name = "network-vpn-symbolic" if up else "network-vpn-disconnected-symbolic"
-        return QIcon.fromTheme(name, QIcon.fromTheme("network-vpn"))
+    def icon(self, up=None):
+        return draw_icon(self.state, self.fg, self.phase)
+
+    def set_state(self, state):
+        if state != self.state:
+            self.state = state
+            self.refresh_icon()
+            self.rebuild_menu()
+
+    def refresh_icon(self):
+        self.tray.setIcon(draw_icon(self.state, self.fg, self.phase))
+        cur = self.current()
+        lines = [f"Glass VPN — {STATE_TEXT[self.state]}"]
+        if cur and self.state != OFF:
+            lines.append(f"Сервер: {cur['name']}")
+        if self.state == ON:
+            if self.probe_ms:
+                lines.append(f"Задержка: {self.probe_ms} мс")
+            lines.append(f"↓ {human_rate(self.rates[0])}   ↑ {human_rate(self.rates[1])}")
+        self.tray.setToolTip("\n".join(lines))
+
+    def animate(self):
+        if self.state == CONNECTING:
+            self.phase = ((self.phase + 0.18 + 1) % 2) - 1
+            self.tray.setIcon(draw_icon(self.state, self.fg, self.phase))
+
+    def tick(self):
+        fg = panel_text_color()
+        if fg != self.fg:
+            self.fg = fg
+            self.refresh_icon()
+        b = tun_bytes()
+        if b and self.last_bytes:
+            self.rates = ((b[0] - self.last_bytes[0]) / 2.0, (b[1] - self.last_bytes[1]) / 2.0)
+        self.last_bytes = b
+        if self.want_up and self.is_up() and not self.probing:
+            self.probing = True
+            threading.Thread(target=lambda: self.sig.probed.emit(socks_probe(PROBE_HOST, PROBE_PORT)),
+                             daemon=True).start()
+        elif not self.want_up:
+            self.set_state(OFF)
+        if self.state == ON:
+            self.refresh_icon()
+
+    def on_probe(self, ms):
+        self.probing = False
+        if not self.want_up:
+            return
+        if ms is not None:
+            self.fails, self.probe_ms = 0, ms
+            self.set_state(ON)
+        else:
+            self.fails += 1
+            # give a fresh connection a few seconds before calling it broken
+            if self.fails >= 3:
+                self.set_state(ERROR)
 
     def current(self):
         sel = self.settings.get("selected")
@@ -294,7 +475,9 @@ class Tray:
         m.clear()
         up = self.is_up()
         cur = self.current()
-        status = QAction(("● Подключено: " if up else "○ Отключено") + (cur["name"] if up and cur else ""), m)
+        mark = {OFF: "○", CONNECTING: "◌", ON: "●", ERROR: "⚠"}[self.state]
+        status = QAction(f"{mark} {STATE_TEXT[self.state].capitalize()}" + (f": {cur['name']}" if cur and self.state != OFF else "")
+                         + (f" · {self.probe_ms} мс" if self.state == ON and self.probe_ms else ""), m)
         status.setEnabled(False)
         m.addAction(status)
         m.addSeparator()
@@ -327,8 +510,7 @@ class Tray:
         m.addAction("Журнал").triggered.connect(lambda: subprocess.Popen(["xdg-open", str(XRAY_LOG)]))
         m.addSeparator()
         m.addAction("Выход").triggered.connect(self.quit)
-        self.tray.setIcon(self.icon(up))
-        self.tray.setToolTip("Glass VPN — " + (f"подключено ({cur['name']})" if up and cur else "отключено"))
+        self.refresh_icon()
 
     def on_click(self, reason):
         if reason == QSystemTrayIcon.ActivationReason.Trigger:
@@ -434,6 +616,8 @@ class Tray:
         self.proc = subprocess.Popen([SING_BOX, "run", "-c", str(SB_CONFIG)],
                                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         self.want_up = True
+        self.fails, self.probe_ms, self.last_bytes = 0, None, None
+        self.set_state(CONNECTING)
         self.settings["selected"] = s["name"]
         save(SETTINGS, self.settings)
         QTimer.singleShot(1500, self.rebuild_menu)
@@ -441,6 +625,7 @@ class Tray:
     def disconnect(self):
         self.want_up = False
         self.stop_process()
+        self.set_state(OFF)
         self.rebuild_menu()
 
     def stop_process(self):
@@ -482,7 +667,8 @@ def main():
     if not QSystemTrayIcon.isSystemTrayAvailable():
         QMessageBox.critical(None, "Glass VPN", "Системный трей недоступен.")
         return 1
-    Tray(app)
+    tray = Tray(app)
+    app.aboutToQuit.connect(tray.stop_process)   # never leave sing-box/Xray behind
     signal.signal(signal.SIGTERM, lambda *_: app.quit())
     return app.exec()
 

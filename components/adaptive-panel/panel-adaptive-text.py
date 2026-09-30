@@ -105,7 +105,8 @@ def colorizer_settings(cp):
 
 # Never recolor: layout helpers, and Happ, whose tray icon is an opaque
 # black-and-white square that turns into a solid block when masked.
-NO_RECOLOR = {COLORIZER, "org.kde.plasma.panelspacer", "org.kde.plasma.marginsseparator", "Happ"}
+NO_RECOLOR = {COLORIZER, "org.kde.plasma.panelspacer", "org.kde.plasma.marginsseparator", "Happ",
+              "Glass VPN"}  # Glass VPN draws its own icon: panel-coloured shield + status dot
 
 
 def force_recolor(panel_widgets):

@@ -10,8 +10,12 @@ A small tray client for VLESS subscriptions: [Xray-core](https://github.com/XTLS
 - Gateways of NetworkManager VPN connections (e.g. a PPTP link home) bypass the tunnel.
 - Subscriptions: plain or base64 lists of `vless://` links; transports tcp, grpc, ws,
   httpupgrade, xhttp; security none, tls, reality; VLESS Encryption.
-- Monochrome tray icon, click to connect/disconnect; server list with a TCP latency test;
-  reconnects if sing-box exits.
+- Tray icon drawn at runtime: a shield in the adaptive top bar's text colour plus a status dot —
+  no dot = off, pulsing amber = connecting, green = the tunnel works (a site is opened through
+  Xray every 2 s), red = the server doesn't answer. Tooltip: server, latency, ↓/↑ speed.
+  Click to connect/disconnect; server list with a TCP latency test; reconnects if a core exits.
+
+  ![Icon states on a light and a dark bar](../../docs/images/glassvpn-states.png)
 
 Files: settings and servers in `~/.config/glassvpn/` (mode 600), sing-box config and log
 in `~/.local/state/glassvpn/`.
