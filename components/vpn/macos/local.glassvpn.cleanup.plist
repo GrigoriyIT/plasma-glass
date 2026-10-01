@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- At boot: if the Mac went down with the tunnel up, give the system DNS back. -->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>local.glassvpn.cleanup</string>
+  <key>ProgramArguments</key>
+  <array><string>/opt/glassvpn/glassvpn-helper</string><string>stop</string></array>
+  <key>RunAtLoad</key><true/>
+</dict>
+</plist>

@@ -28,3 +28,21 @@ components/vpn/install.sh
 DNS of its TUN link through systemd-resolved on every connect and reverts it on disconnect,
 and without the rule each of those calls asks for the password. It allows only resolved's
 per-link DNS actions, only for local active sessions of users in the `sudo` group.
+
+## macOS
+
+```bash
+components/vpn/macos/install.sh
+```
+
+Same client, menu bar icon instead of the tray. macOS has no file capabilities, so sing-box runs as
+root through `macos/glassvpn-helper` (in `/opt/glassvpn`, root-owned; a sudoers rule allows only
+`start <config>` and `stop`). The helper accepts only the config shape the client generates, forces
+log/cache paths, and points the system DNS at the tunnel while it is up, restoring it on stop (and at
+boot via `local.glassvpn.cleanup`). Settings in `~/Library/Application Support/GlassVPN`, logs in
+`~/Library/Logs/GlassVPN`. `macos/switch-test.sh` moves a Mac from another VPN to Glass VPN with an
+automatic rollback; `macos/make-icon.py` draws the app icon.
+
+The app bundle's executable is a copy of the Python launcher (script passed via `LSEnvironment` and
+`sitecustomize.py`): macOS 26 silently drops the menu bar item of an app whose executable is a shell
+script that execs Python.

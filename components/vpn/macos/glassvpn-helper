@@ -1,0 +1,182 @@
+#!/usr/bin/python3 -I
+"""Glass VPN root helper for macOS.
+
+macOS has no file capabilities, so creating the utun device and its routes needs
+root. The tray app runs this helper through sudo (see install.sh for the
+sudoers rule); it starts/stops sing-box and points the system DNS at the tunnel
+while it is up, restoring the previous DNS settings afterwards.
+
+  glassvpn-helper start <sing-box.json>   validate, start sing-box, take over DNS
+  glassvpn-helper stop                    stop sing-box, restore DNS (idempotent)
+
+Only the config shape the tray generates is accepted (a TUN inbound, socks and
+direct outbounds, remote rule sets); file paths are forced to root-owned places,
+so the rule cannot be used to make root read or write arbitrary files.
+"""
+import json
+import os
+import signal
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+BASE = Path("/opt/glassvpn")
+SING_BOX = BASE / "sing-box"
+RUN = BASE / "run"
+CONFIG = RUN / "sing-box.json"
+DNS_BACKUP = RUN / "dns-backup.json"
+PIDFILE = Path("/var/run/glassvpn.pid")
+LOG = Path("/var/log/glassvpn/sing-box.log")
+TUN_DNS = "198.18.0.2"   # peer address of the TUN: queries sent there are hijacked by sing-box
+ALLOWED_TOP = {"log", "dns", "inbounds", "outbounds", "route", "experimental"}
+
+
+def fail(msg):
+    print(msg, file=sys.stderr)
+    sys.exit(1)
+
+
+def sanitize(cfg):
+    if not isinstance(cfg, dict) or set(cfg) - ALLOWED_TOP:
+        fail("unexpected config sections")
+    level = str(cfg.get("log", {}).get("level", "warn"))
+    cfg["log"] = {"level": level, "output": str(LOG), "timestamp": True}
+    cfg["experimental"] = {"cache_file": {"enabled": True, "path": str(RUN / "cache.db")}}
+    inbounds = cfg.get("inbounds", [])
+    if not inbounds or any(ib.get("type") != "tun" for ib in inbounds):
+        fail("only a tun inbound is allowed")
+    for ob in cfg.get("outbounds", []):
+        if ob.get("type") not in ("socks", "direct") or "tls" in ob:
+            fail("only socks and direct outbounds are allowed")
+    for rs in cfg.get("route", {}).get("rule_set", []):
+        if rs.get("type") != "remote":
+            fail("only remote rule sets are allowed")
+    for srv in cfg.get("dns", {}).get("servers", []):
+        if srv.get("type") not in ("https", "udp", "tcp", "tls", "local"):
+            fail("unexpected dns server type")
+    return cfg
+
+
+def run(*cmd):
+    return subprocess.run(cmd, capture_output=True, text=True).stdout
+
+
+def services():
+    """Enabled network services bound to a device (Wi-Fi, Ethernet…), not VPN profiles."""
+    out, name = [], None
+    for line in run("networksetup", "-listnetworkserviceorder").splitlines():
+        line = line.strip()
+        if line.startswith("(") and ")" in line and not line.startswith("(Hardware"):
+            name = line.split(")", 1)[1].strip()
+            if line.startswith("(*)"):   # disabled
+                name = None
+        elif line.startswith("(Hardware Port") and name:
+            if "Device: )" not in line and "Device:" in line:
+                out.append(name)
+            name = None
+    return out
+
+
+def flush_dns():
+    run("dscacheutil", "-flushcache")
+    run("killall", "-HUP", "mDNSResponder")
+
+
+def take_dns():
+    if not DNS_BACKUP.exists():   # keep the first backup if start is called twice
+        backup = {}
+        for svc in services():
+            cur = run("networksetup", "-getdnsservers", svc).split()
+            backup[svc] = [] if "aren't" in cur or not cur else cur
+        DNS_BACKUP.write_text(json.dumps(backup))
+        os.chmod(DNS_BACKUP, 0o600)
+    for svc in json.loads(DNS_BACKUP.read_text()):
+        run("networksetup", "-setdnsservers", svc, TUN_DNS)
+    flush_dns()
+
+
+def restore_dns():
+    if not DNS_BACKUP.exists():
+        return
+    for svc, servers in json.loads(DNS_BACKUP.read_text()).items():
+        run("networksetup", "-setdnsservers", svc, *(servers or ["Empty"]))
+    DNS_BACKUP.unlink()
+    flush_dns()
+
+
+def ours(pid):
+    return run("ps", "-p", str(pid), "-o", "comm=").strip() == str(SING_BOX)
+
+
+def stop():
+    pids = {int(p) for p in run("pgrep", "-f", f"^{SING_BOX} run").split()}
+    try:
+        pids.add(int(PIDFILE.read_text()))
+    except (OSError, ValueError):
+        pass
+    for pid in pids:
+        if ours(pid):
+            os.kill(pid, signal.SIGTERM)
+    deadline = time.time() + 5
+    while any(ours(p) for p in pids) and time.time() < deadline:
+        time.sleep(0.1)
+    for pid in pids:
+        if ours(pid):
+            os.kill(pid, signal.SIGKILL)
+    PIDFILE.unlink(missing_ok=True)
+    restore_dns()
+
+
+def start(path):
+    src = Path(path)
+    st = src.stat()
+    uid = int(os.environ.get("SUDO_UID", "-1"))
+    if not src.is_file() or st.st_uid != uid or st.st_size > 1 << 20:
+        fail("config must be a small regular file owned by the calling user")
+    try:
+        cfg = sanitize(json.loads(src.read_text()))
+    except ValueError:
+        fail("config is not valid JSON")
+    RUN.mkdir(mode=0o700, parents=True, exist_ok=True)
+    LOG.parent.mkdir(mode=0o755, parents=True, exist_ok=True)
+    CONFIG.write_text(json.dumps(cfg))
+    os.chmod(CONFIG, 0o600)
+    check = subprocess.run([str(SING_BOX), "check", "-c", str(CONFIG)], capture_output=True, text=True)
+    if check.returncode != 0:
+        fail((check.stderr or check.stdout)[-300:])
+    stop()
+    with open(LOG, "a") as log:
+        os.chmod(LOG, 0o644)
+        proc = subprocess.Popen([str(SING_BOX), "run", "-c", str(CONFIG)], stdin=subprocess.DEVNULL,
+                                stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
+    PIDFILE.write_text(str(proc.pid))
+    tun = cfg["inbounds"][0].get("interface_name", "")
+    deadline = time.time() + 15   # first start downloads the rule sets
+    while time.time() < deadline:
+        if proc.poll() is not None:
+            PIDFILE.unlink(missing_ok=True)
+            fail("sing-box exited: " + LOG.read_text()[-300:])
+        if tun and subprocess.run(["ifconfig", tun], capture_output=True).returncode == 0:
+            break
+        time.sleep(0.2)
+    else:
+        stop()
+        fail("tunnel did not come up in time")
+    take_dns()
+    print(proc.pid)
+
+
+def main():
+    if os.geteuid() != 0:
+        fail("must run as root")
+    if len(sys.argv) == 3 and sys.argv[1] == "start":
+        start(sys.argv[2])
+    elif len(sys.argv) == 2 and sys.argv[1] == "stop":
+        stop()
+    else:
+        fail(__doc__)
+
+
+if __name__ == "__main__":
+    main()

@@ -9,8 +9,10 @@ Two child processes:
   providers use: VLESS Encryption mlkem768x25519, Reality, gRPC, XHTTP) and
   exposes a SOCKS5 proxy on 127.0.0.1 only;
 - sing-box owns the system-wide TUN and the routing, sending "proxy" traffic
-  to that SOCKS port. Its binary gets cap_net_admin (see install.sh), so
-  nothing here runs as root.
+  to that SOCKS port. On Linux its binary gets cap_net_admin (see install.sh),
+  so nothing here runs as root. macOS has no capabilities: sing-box is started
+  by a small root helper (macos/glassvpn-helper, allowed via sudoers) that also
+  points the system DNS at the tunnel while it is up.
 """
 import base64
 import json
@@ -32,21 +34,34 @@ from PyQt6.QtWidgets import (QApplication, QInputDialog, QMenu, QMessageBox,
                              QSystemTrayIcon)
 
 APP = "glassvpn"
-CONFIG_DIR = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / APP
-STATE_DIR = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state")) / APP
-CACHE_DIR = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / APP
+IS_MAC = sys.platform == "darwin"
+if IS_MAC:
+    CONFIG_DIR = Path.home() / "Library/Application Support/GlassVPN"
+    STATE_DIR = Path.home() / "Library/Logs/GlassVPN"
+    CACHE_DIR = Path.home() / "Library/Caches/GlassVPN"
+    MAC_BIN = Path("/opt/glassvpn")                   # root-owned: the helper runs sing-box as root
+    HELPER = str(MAC_BIN / "glassvpn-helper")
+    SING_BOX = str(MAC_BIN / "sing-box")
+    XRAY = str(MAC_BIN / "xray")
+    SB_LOG = Path("/var/log/glassvpn/sing-box.log")  # written by the helper
+    AUTOSTART = Path.home() / "Library/LaunchAgents/local.glassvpn.plist"
+    TUN = "utun225"                                  # macOS only accepts utunN names
+else:
+    CONFIG_DIR = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / APP
+    STATE_DIR = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state")) / APP
+    CACHE_DIR = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / APP
+    SING_BOX = os.environ.get("GLASSVPN_SING_BOX", "/usr/local/bin/sing-box")
+    XRAY = os.environ.get("GLASSVPN_XRAY", "/usr/local/bin/xray")
+    SB_LOG = STATE_DIR / "sing-box.log"
+    AUTOSTART = Path.home() / ".config/autostart/glassvpn.desktop"
+    TUN = "glassvpn0"
 SETTINGS = CONFIG_DIR / "settings.json"
 SERVERS = CONFIG_DIR / "servers.json"
 SB_CONFIG = STATE_DIR / "sing-box.json"
-SB_LOG = STATE_DIR / "sing-box.log"
-SING_BOX = os.environ.get("GLASSVPN_SING_BOX", "/usr/local/bin/sing-box")
-XRAY = os.environ.get("GLASSVPN_XRAY", "/usr/local/bin/xray")
 XRAY_CONFIG = STATE_DIR / "xray.json"
 XRAY_LOG = STATE_DIR / "xray.log"
 SOCKS_PORT = 10808
-AUTOSTART = Path.home() / ".config/autostart/glassvpn.desktop"
 APPLETSRC = Path.home() / ".config/plasma-org.kde.plasma.desktop-appletsrc"
-TUN = "glassvpn0"
 PROBE_HOST, PROBE_PORT = "www.google.com", 443   # reachable only through the tunnel
 
 # tray states
@@ -163,14 +178,18 @@ def xray_config(s, server_ip):
     }
 
 
-def build_config(server, direct_hosts):
+def build_config(server, direct_hosts, local_dns=None):
     ru = {"rule_set": ["geosite-ru"]}
+    # on macOS the system resolver points at the tunnel while it is up, so "local"
+    # must be the network's own DNS server, asked directly
+    local = {"type": "udp", "tag": "local", "server": local_dns} if local_dns else {"type": "local", "tag": "local"}
+    direct_rules = [{"process_name": ["xray"], "outbound": "direct"}] if IS_MAC else []
     return {
         "log": {"level": "warn", "output": str(SB_LOG), "timestamp": True},
         "dns": {
             "servers": [
                 {"type": "https", "tag": "remote", "server": "1.1.1.1", "detour": "proxy"},
-                {"type": "local", "tag": "local"},
+                local,
             ],
             "rules": [
                 {"domain_suffix": RU_SUFFIXES, "server": "local"},
@@ -180,7 +199,7 @@ def build_config(server, direct_hosts):
             "strategy": "ipv4_only",  # most home networks here have no IPv6
         },
         "inbounds": [{
-            "type": "tun", "tag": "tun-in", "interface_name": "glassvpn0",
+            "type": "tun", "tag": "tun-in", "interface_name": TUN,
             # IPv4 only: with an IPv6 address the tunnel would swallow AAAA traffic
             # that has nowhere to go on networks without IPv6
             "address": ["198.18.0.1/30"],
@@ -197,6 +216,7 @@ def build_config(server, direct_hosts):
             "rules": [
                 {"action": "sniff"},
                 {"protocol": "dns", "action": "hijack-dns"},
+                *direct_rules,   # Xray's own link to the server never loops back into the tunnel
                 {"ip_is_private": True, "outbound": "direct"},
                 {"domain_suffix": RU_SUFFIXES, "outbound": "direct"},
                 {"rule_set": ["geosite-ru", "geoip-ru"], "outbound": "direct"},
@@ -217,6 +237,8 @@ def build_config(server, direct_hosts):
 def pptp_gateways():
     """Gateways of NetworkManager PPTP/VPN connections, so they bypass the tunnel."""
     out = []
+    if IS_MAC:
+        return out
     try:
         names = subprocess.run(["nmcli", "-t", "-f", "NAME,TYPE", "connection", "show"],
                                capture_output=True, text=True, timeout=5).stdout
@@ -270,7 +292,40 @@ def socks_probe(host, port, timeout=6.0):
         return None
 
 
+def mac_system_dns():
+    """DNS servers the network (DHCP) hands out, read per physical interface so the
+    tunnel's own override never shows up here."""
+    ifaces = []
+    try:
+        out = subprocess.run(["scutil"], input="show State:/Network/Global/IPv4\n",
+                             capture_output=True, text=True, timeout=5).stdout
+        for line in out.splitlines():
+            if "PrimaryInterface" in line:
+                ifaces.append(line.split(":", 1)[1].strip())
+    except (OSError, subprocess.SubprocessError):
+        pass
+    for iface in ifaces + ["en0", "en1", "en2", "en3", "en4", "en5"]:
+        if iface.startswith("utun"):
+            continue
+        try:
+            dns = subprocess.run(["ipconfig", "getoption", iface, "domain_name_server"],
+                                 capture_output=True, text=True, timeout=5).stdout.strip()
+        except (OSError, subprocess.SubprocessError):
+            continue
+        if dns:
+            return dns
+    return "77.88.8.8"   # Yandex DNS: works from any Russian network
+
+
 def tun_bytes():
+    if IS_MAC:
+        try:
+            out = subprocess.run(["netstat", "-I", TUN, "-b", "-n"], capture_output=True,
+                                 text=True, timeout=3).stdout.splitlines()
+            cols = out[1].split()   # Name Mtu Network Ipkts Ierrs Ibytes Opkts Oerrs Obytes Coll
+            return int(cols[5]), int(cols[8])
+        except (OSError, subprocess.SubprocessError, IndexError, ValueError):
+            return None
     base = Path("/sys/class/net") / TUN / "statistics"
     try:
         return int((base / "rx_bytes").read_text()), int((base / "tx_bytes").read_text())
@@ -287,6 +342,13 @@ def human_rate(bps):
 
 def panel_text_color():
     """Colour the adaptive top bar currently uses for text, so the shield matches it."""
+    if IS_MAC:
+        try:
+            dark = subprocess.run(["defaults", "read", "-g", "AppleInterfaceStyle"], capture_output=True,
+                                  text=True, timeout=3).stdout.strip() == "Dark"
+        except (OSError, subprocess.SubprocessError):
+            dark = True
+        return QColor("#ffffff" if dark else "#000000")
     try:
         import configparser
         cp = configparser.RawConfigParser(strict=False, interpolation=None)
@@ -354,6 +416,48 @@ def draw_icon(state, fg, phase=0.0):
         p.drawEllipse(QPointF(size - r - 1, size - r - 1), r, r)
     p.end()
     return QIcon(pm)
+
+
+class HelperProc:
+    """sing-box started as root by the macOS helper, with the Popen methods the tray uses."""
+    PIDFILE = Path("/var/run/glassvpn.pid")
+
+    def __init__(self, config):
+        r = subprocess.run(["sudo", "-n", HELPER, "start", str(config)],
+                           capture_output=True, text=True, timeout=60)
+        if r.returncode != 0:
+            raise RuntimeError((r.stderr or r.stdout).strip()[-200:] or "helper failed")
+        self.pid = int(self.PIDFILE.read_text())
+
+    def poll(self):
+        try:
+            os.kill(self.pid, 0)
+        except PermissionError:   # alive, but owned by root
+            return None
+        except OSError:
+            return 1
+        return None
+
+    def send_signal(self, _sig):
+        helper_stop()
+
+    def wait(self, timeout=None):
+        return 0
+
+    kill = send_signal
+
+
+def helper_stop():
+    """Stop sing-box and give the system DNS back; safe to call when nothing runs."""
+    subprocess.run(["sudo", "-n", HELPER, "stop"], capture_output=True, timeout=30)
+
+
+def mac_hide_dock_icon():
+    try:
+        from AppKit import NSApplication, NSApplicationActivationPolicyAccessory
+        NSApplication.sharedApplication().setActivationPolicy_(NSApplicationActivationPolicyAccessory)
+    except ImportError:
+        pass
 
 
 # ------------------------------------------------------------------ tray --
@@ -507,13 +611,16 @@ class Tray:
         ac.setCheckable(True)
         ac.setChecked(AUTOSTART.exists() and self.settings.get("autoconnect", True))
         ac.toggled.connect(self.set_autostart)
-        m.addAction("Журнал").triggered.connect(lambda: subprocess.Popen(["xdg-open", str(XRAY_LOG)]))
+        m.addAction("Журнал").triggered.connect(
+            lambda: subprocess.Popen(["open", "-a", "Console", str(XRAY_LOG), str(SB_LOG)] if IS_MAC
+                                     else ["xdg-open", str(XRAY_LOG)]))
         m.addSeparator()
         m.addAction("Выход").triggered.connect(self.quit)
         self.refresh_icon()
 
     def on_click(self, reason):
-        if reason == QSystemTrayIcon.ActivationReason.Trigger:
+        # on macOS a click opens the menu, as with every menu bar item
+        if reason == QSystemTrayIcon.ActivationReason.Trigger and not IS_MAC:
             (self.disconnect if self.want_up else self.connect)()
 
     def notify(self, title, text):
@@ -601,10 +708,12 @@ class Tray:
             return
         STATE_DIR.mkdir(parents=True, exist_ok=True)
         CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        if IS_MAC:   # stop first: the old tunnel's DNS override would hide the real resolver
+            self.stop_process()
         server_ips = resolve(s["host"])
         direct = pptp_gateways() + server_ips
         save(XRAY_CONFIG, xray_config(s, server_ips[0] if server_ips else None))
-        save(SB_CONFIG, build_config(s, direct))
+        save(SB_CONFIG, build_config(s, direct, mac_system_dns() if IS_MAC else None))
         for cmd in ([XRAY, "run", "-test", "-c", str(XRAY_CONFIG)], [SING_BOX, "check", "-c", str(SB_CONFIG)]):
             check = subprocess.run(cmd, capture_output=True, text=True)
             if check.returncode != 0:
@@ -613,8 +722,18 @@ class Tray:
         self.stop_process()
         self.xray = subprocess.Popen([XRAY, "run", "-c", str(XRAY_CONFIG)],
                                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        self.proc = subprocess.Popen([SING_BOX, "run", "-c", str(SB_CONFIG)],
-                                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if IS_MAC:
+            try:
+                self.proc = HelperProc(SB_CONFIG)
+            except (RuntimeError, OSError, ValueError, subprocess.SubprocessError) as e:
+                self.stop_process()
+                self.want_up = False
+                self.set_state(ERROR)
+                self.notify("Glass VPN", f"Не удалось поднять туннель: {e}")
+                return
+        else:
+            self.proc = subprocess.Popen([SING_BOX, "run", "-c", str(SB_CONFIG)],
+                                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         self.want_up = True
         self.fails, self.probe_ms, self.last_bytes = 0, None, None
         self.set_state(CONNECTING)
@@ -636,6 +755,8 @@ class Tray:
                     p.wait(timeout=5)
                 except subprocess.TimeoutExpired:
                     p.kill()
+        if IS_MAC and isinstance(self.proc, HelperProc) and self.proc.poll() is not None:
+            helper_stop()   # sing-box died on its own: still give the DNS back
         self.proc = self.xray = None
 
     def check_process(self):
@@ -647,7 +768,10 @@ class Tray:
     def set_autostart(self, on):
         self.settings["autoconnect"] = on
         save(SETTINGS, self.settings)
-        if on:
+        if on and IS_MAC:
+            AUTOSTART.parent.mkdir(parents=True, exist_ok=True)
+            AUTOSTART.write_text(MAC_LAUNCH_AGENT.format(app=Path.home() / "Applications/Glass VPN.app"))
+        elif on:
             AUTOSTART.parent.mkdir(parents=True, exist_ok=True)
             AUTOSTART.write_text("[Desktop Entry]\nType=Application\nName=Glass VPN\n"
                                  "Exec=glassvpn\nIcon=network-vpn\nX-GNOME-Autostart-enabled=true\n")
@@ -659,11 +783,36 @@ class Tray:
         self.app.quit()
 
 
+MAC_LAUNCH_AGENT = """<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>local.glassvpn</string>
+  <key>ProgramArguments</key><array><string>/usr/bin/open</string><string>-a</string><string>{app}</string></array>
+  <key>RunAtLoad</key><true/>
+  <key>ProcessType</key><string>Interactive</string>
+</dict>
+</plist>
+"""
+
+
 def main():
+    if IS_MAC:
+        import fcntl
+        CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        lock = open(CACHE_DIR / "instance.lock", "w")
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)   # held until exit
+        except OSError:
+            return 0   # already running
+        main.lock = lock
+        helper_stop()   # a crash last time may have left sing-box or the DNS override behind
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)
     app.setApplicationName("Glass VPN")
     app.setDesktopFileName("glassvpn")
+    if IS_MAC:
+        mac_hide_dock_icon()
     if not QSystemTrayIcon.isSystemTrayAvailable():
         QMessageBox.critical(None, "Glass VPN", "Системный трей недоступен.")
         return 1
