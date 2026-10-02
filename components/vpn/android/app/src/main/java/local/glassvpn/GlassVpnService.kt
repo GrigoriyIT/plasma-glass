@@ -185,10 +185,10 @@ class GlassVpnService : VpnService() {
             .setMtu(TUN_MTU)
             .addAddress(TUN_ADDR, 30)
             .addDnsServer(TUN_DNS)
-            .setMetered(false)
             .setConfigureIntent(PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java),
                                                           PendingIntent.FLAG_IMMUTABLE))
             .addDisallowedApplication(packageName)
+        if (Build.VERSION.SDK_INT >= 29) builder.setMetered(false)
         // apps the user sent around the tunnel: the system routes them (and their DNS) directly
         for (pkg in store.excluded) {
             try { builder.addDisallowedApplication(pkg) } catch (e: Exception) { /* uninstalled */ }

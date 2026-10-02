@@ -34,7 +34,7 @@ class ToggleTile : TileService() {
     private fun refresh(on: Boolean = GlassVpnService.status.value.state != VpnState.OFF) {
         val tile = qsTile ?: return
         tile.state = if (on) Tile.STATE_ACTIVE else Tile.STATE_INACTIVE
-        tile.subtitle = GlassVpnService.status.value.server.takeIf { on && it.isNotEmpty() }
+        if (Build.VERSION.SDK_INT >= 29) tile.subtitle = GlassVpnService.status.value.server.takeIf { on && it.isNotEmpty() }
         tile.updateTile()
     }
 }
