@@ -71,6 +71,13 @@ Xray in-process ([AndroidLibXrayLite](https://github.com/2dust/AndroidLibXrayLit
 - Shield button with the same status colours as the tray icon; the live check fetches
   `generate_204` through Xray every 4 s while the screen is on. Speed and latency in the notification.
 - Quick Settings tile; "Always-on VPN" and "Block connections without VPN" in the system settings work.
+- Settings: connect when the app opens, connect after boot (and after an app update if the tunnel
+  was on), and apps that bypass the tunnel: the system routes them, DNS included, outside the VPN
+  (with "Block connections without VPN" they get no network at all). Time connected on the main
+  screen and as a chronometer in the notification.
+- Keeps itself running: a sticky foreground service that comes back if the system kills it, and a
+  watchdog that restarts Xray (re-resolving the server) when it stops or the server has been silent
+  for 30 s, backing off up to 5 min.
 - Network check (menu, or the "problems found" chip on the main screen): lists other VPN apps
   (found by their `BIND_VPN_SERVICE` service, hence `QUERY_ALL_PACKAGES` — fine outside Google Play)
   and checks internet / captive portal, another active VPN, a fixed Private DNS server (bypasses the

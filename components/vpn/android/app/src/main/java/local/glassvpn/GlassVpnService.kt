@@ -39,6 +39,7 @@ data class VpnStatus(
     val down: Long = 0,      // bytes per second
     val up: Long = 0,
     val message: String? = null,
+    val since: Long = 0,     // wall-clock ms of the first successful check of this connection
 )
 
 val STATE_TEXT = mapOf(VpnState.OFF to "отключено", VpnState.CONNECTING to "подключение…",
@@ -58,9 +59,13 @@ class GlassVpnService : VpnService() {
     companion object {
         const val ACTION_CONNECT = "local.glassvpn.CONNECT"
         const val ACTION_DISCONNECT = "local.glassvpn.DISCONNECT"
+        /** Boot / update / always-on: connect, but leave a working tunnel alone. */
+        const val EXTRA_IF_DOWN = "if_down"
         private const val TAG = "GlassVPN"
         private const val CHANNEL = "vpn"
         private const val NOTIFY_ID = 1
+        private const val WATCHDOG_MIN = 30_000_000_000L    // ns
+        private const val WATCHDOG_MAX = 300_000_000_000L
         private const val FALLBACK_DNS = "77.88.8.8"   // Yandex: answers for Russian names
 
         val status = MutableStateFlow(VpnStatus())
@@ -69,8 +74,8 @@ class GlassVpnService : VpnService() {
             private set
         private var coreEnvReady = false
 
-        fun start(ctx: Context, action: String = ACTION_CONNECT) {
-            val i = Intent(ctx, GlassVpnService::class.java).setAction(action)
+        fun start(ctx: Context, action: String = ACTION_CONNECT, ifDown: Boolean = false) {
+            val i = Intent(ctx, GlassVpnService::class.java).setAction(action).putExtra(EXTRA_IF_DOWN, ifDown)
             if (action == ACTION_CONNECT) ctx.startForegroundService(i) else ctx.startService(i)
         }
     }
@@ -88,6 +93,8 @@ class GlassVpnService : VpnService() {
     private var lastStats: LongArray? = null
     private var lastStatsAt = 0L
     private var failures = 0
+    private var errorSince = 0L                    // nanoTime when the server stopped answering
+    private var restartDelay = WATCHDOG_MIN
     private var tick = 0
 
     private val cm by lazy { getSystemService(ConnectivityManager::class.java) }
@@ -112,10 +119,16 @@ class GlassVpnService : VpnService() {
             worker.execute { disconnect() }
             return START_NOT_STICKY
         }
+        // a sticky restart after the system killed us: only if the user still wants the tunnel
+        if (intent == null && !Store(this).wanted) {
+            stopSelf()
+            return START_NOT_STICKY
+        }
         // ACTION_CONNECT, always-on (android.net.VpnService) or a sticky restart
-        startForeground(NOTIFY_ID, notification(VpnStatus(VpnState.CONNECTING)),
-                        ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
-        worker.execute { connect() }
+        val st = status.value.takeIf { it.state != VpnState.OFF } ?: VpnStatus(VpnState.CONNECTING)
+        startForeground(NOTIFY_ID, notification(st), ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+        val ifDown = intent == null || intent.action != ACTION_CONNECT || intent.getBooleanExtra(EXTRA_IF_DOWN, false)
+        worker.execute { if (!(ifDown && running)) connect() }
         return START_STICKY
     }
 
@@ -170,6 +183,10 @@ class GlassVpnService : VpnService() {
             .setConfigureIntent(PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java),
                                                           PendingIntent.FLAG_IMMUTABLE))
             .addDisallowedApplication(packageName)
+        // apps the user sent around the tunnel: the system routes them (and their DNS) directly
+        for (pkg in store.excluded) {
+            try { builder.addDisallowedApplication(pkg) } catch (e: Exception) { /* uninstalled */ }
+        }
         // no IPv6 address or route: Android then blocks IPv6 for VPN'd apps instead of leaking it
         for ((addr, len) in routesExcluding(EXCLUDED_NETS)) builder.addRoute(addr, len)
         underlying?.let { builder.setUnderlyingNetworks(arrayOf(it)) }
@@ -186,6 +203,8 @@ class GlassVpnService : VpnService() {
 
         running = true
         failures = 0
+        errorSince = 0L
+        restartDelay = WATCHDOG_MIN
         lastStats = null
         ticker = timer.scheduleWithFixedDelay({ tick() }, 0, 2, TimeUnit.SECONDS)
         TileService.requestListeningState(this, android.content.ComponentName(this, ToggleTile::class.java))
@@ -231,15 +250,21 @@ class GlassVpnService : VpnService() {
             if (running && dns != localDns) {
                 Log.i(TAG, "network DNS $localDns -> $dns, restarting Xray")
                 localDns = dns
-                val s = server ?: return@execute
-                val creds = socks ?: return@execute
-                try {
-                    core?.stopLoop()
-                    core?.startLoop(xrayConfig(s, serverIp, creds, dns), 0)
-                } catch (e: Exception) {
-                    Log.e(TAG, "xray restart", e)
-                }
+                restartCore()
             }
+        }
+    }
+
+    /** Restart Xray inside the running tunnel (TUN and hev stay up; the server is re-resolved). */
+    private fun restartCore() {
+        val s = server ?: return
+        val creds = socks ?: return
+        resolveIpv4(s.host)?.let { serverIp = it }
+        try {
+            core?.stopLoop()
+            core?.startLoop(xrayConfig(s, serverIp, creds, localDns), 0)
+        } catch (e: Exception) {
+            Log.e(TAG, "xray restart", e)
         }
     }
 
@@ -265,17 +290,33 @@ class GlassVpnService : VpnService() {
         var next = cur.copy(down = down, up = up)
         // live check every 4 s, only while the screen is on (keeps the radio idle otherwise)
         // (every tick while connecting or failing, so a dead server shows up quickly)
-        if ((tick++ % 2 == 0 && interactive) || cur.state != VpnState.ON || failures > 0) {
+        // (every tick while connecting or failing so a dead server shows up quickly; every 30 s
+        // when failing with the screen off)
+        val n = tick++
+        val failing = cur.state != VpnState.ON || failures > 0
+        if ((n % 2 == 0 && interactive) || (failing && (interactive || n % 15 == 0))) {
             val ms = socks?.let { socksProbe(it) }
             if (!running) return
             if (ms != null) {
                 failures = 0
-                next = next.copy(state = VpnState.ON, latency = ms, message = null)
+                errorSince = 0L
+                restartDelay = WATCHDOG_MIN
+                next = next.copy(state = VpnState.ON, latency = ms, message = null,
+                                 since = cur.since.takeIf { it != 0L } ?: System.currentTimeMillis())
             } else if (++failures >= 3) {
                 next = next.copy(state = VpnState.ERROR, latency = null)
+                if (errorSince == 0L) errorSince = now
             }
         }
         publish(next)
+        // watchdog: Xray died, or the server has been silent too long -> restart it, backing off
+        val coreDead = core?.isRunning == false
+        if (coreDead || (errorSince != 0L && now - errorSince > restartDelay)) {
+            Log.w(TAG, if (coreDead) "watchdog: Xray stopped" else "watchdog: no answer for ${restartDelay / 1_000_000_000} s")
+            errorSince = if (errorSince != 0L) now else 0L
+            restartDelay = minOf(restartDelay * 2, WATCHDOG_MAX)
+            worker.execute { if (running) restartCore() }
+        }
     }
 
     private fun publish(st: VpnStatus) {
@@ -303,6 +344,10 @@ class GlassVpnService : VpnService() {
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setColor(stateColor(st.state).toInt())
+            .apply {   // the system ticks the "connected for" time itself
+                if (st.since != 0L) setWhen(st.since).setShowWhen(true).setUsesChronometer(true)
+                else setShowWhen(false)
+            }
             .addAction(Notification.Action.Builder(null, "Отключить", stop).build())
             .setForegroundServiceBehavior(Notification.FOREGROUND_SERVICE_IMMEDIATE)
             .build()

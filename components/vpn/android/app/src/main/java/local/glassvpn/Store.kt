@@ -33,6 +33,21 @@ class Store(context: Context) {
         get() = prefs.getBoolean("wanted", false)
         set(v) = prefs.edit().putBoolean("wanted", v).apply()
 
+    /** Connect when the app is opened. */
+    var autoConnect: Boolean
+        get() = prefs.getBoolean("auto_connect", true)
+        set(v) = prefs.edit().putBoolean("auto_connect", v).apply()
+
+    /** Connect after the phone boots. */
+    var bootStart: Boolean
+        get() = prefs.getBoolean("boot_start", true)
+        set(v) = prefs.edit().putBoolean("boot_start", v).apply()
+
+    /** Packages that bypass the tunnel completely. */
+    var excluded: Set<String>
+        get() = prefs.getStringSet("excluded", emptySet())!!.toSet()
+        set(v) = prefs.edit().putStringSet("excluded", v).apply()
+
     var latency: Map<String, Int?>
         get() = JSONObject(prefs.getString("latency", "{}")!!).let { o ->
             o.keys().asSequence().associateWith { if (o.isNull(it)) null else o.getInt(it) }

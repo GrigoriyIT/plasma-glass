@@ -18,8 +18,8 @@ android {
         applicationId = "local.glassvpn"
         minSdk = 29          // hev-socks5-tunnel's floor
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "1.1"
     }
 
     signingConfigs {

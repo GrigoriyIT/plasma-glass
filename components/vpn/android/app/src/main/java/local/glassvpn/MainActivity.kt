@@ -63,7 +63,8 @@ class MainActivity : ComponentActivity() {
     private var busy by mutableStateOf(false)
     private var checks by mutableStateOf(listOf<Check>())
     private var vpnApps by mutableStateOf(listOf<VpnApp>())
-    private var checking by mutableStateOf(false)
+    private enum class Page { MAIN, CHECK, SETTINGS, APPS }
+    private var page by mutableStateOf(Page.MAIN)
     private val removeQueue = ArrayDeque<VpnApp>()
 
     // one system uninstall dialog after another for "remove all"
@@ -84,11 +85,24 @@ class MainActivity : ComponentActivity() {
         reload()
         if (android.os.Build.VERSION.SDK_INT >= 33) notifyPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
         handle(intent)
+        // auto-connect when the user opens the app (not on rotation, not from a share/tile intent)
+        if (savedInstanceState == null && intent?.action == Intent.ACTION_MAIN && store.autoConnect &&
+            store.servers.isNotEmpty() && GlassVpnService.status.value.state == VpnState.OFF) connect()
         setContent {
             val dark = isSystemInDarkTheme()
             MaterialTheme(colorScheme = if (dark) darkColorScheme() else lightColorScheme()) {
                 val st by GlassVpnService.status.collectAsStateWithLifecycle()
-                if (checking) CheckScreen(dark) else Screen(st, dark)
+                when (page) {
+                    Page.MAIN -> Screen(st, dark)
+                    Page.CHECK -> CheckScreen(dark)
+                    Page.SETTINGS -> SettingsScreen(dark, store, onBack = { page = Page.MAIN },
+                                                    onApps = { page = Page.APPS }, open = ::open)
+                    Page.APPS -> AppsScreen(dark, store) { changed ->
+                        page = Page.SETTINGS
+                        // the exclusion list is fixed when the TUN is built: rebuild it
+                        if (changed && GlassVpnService.status.value.state != VpnState.OFF) GlassVpnService.start(this)
+                    }
+                }
             }
         }
     }
@@ -209,13 +223,11 @@ class MainActivity : ComponentActivity() {
                         IconButton(onClick = { menu = true }) { Icon(Icons.Filled.MoreVert, "Ещё") }
                         DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                             DropdownMenuItem(text = { Text("Проверка сети и других VPN") },
-                                             onClick = { menu = false; checking = true })
+                                             onClick = { menu = false; page = Page.CHECK })
+                            DropdownMenuItem(text = { Text("Настройки") },
+                                             onClick = { menu = false; page = Page.SETTINGS })
                             DropdownMenuItem(text = { Text("Проверить задержку") },
                                              onClick = { menu = false; testLatency() })
-                            DropdownMenuItem(text = { Text("Постоянная VPN…") }, onClick = {
-                                menu = false
-                                startActivity(Intent(Settings.ACTION_VPN_SETTINGS))
-                            })
                             DropdownMenuItem(text = { Text("Удалить все серверы") }, onClick = {
                                 menu = false
                                 store.subscriptions = emptyList(); store.servers = emptyList(); store.latency = emptyMap()
@@ -237,6 +249,7 @@ class MainActivity : ComponentActivity() {
                     VpnState.CONNECTING -> st.server
                     VpnState.OFF -> selected ?: "Добавьте подписку"
                 }
+                if (st.state != VpnState.OFF && st.since != 0L) ConnectedFor(st.since)
                 Text(detail, fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f),
                      textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                      modifier = Modifier.align(Alignment.CenterHorizontally).padding(top = 4.dp))
@@ -244,7 +257,7 @@ class MainActivity : ComponentActivity() {
                 val problems = vpnApps.size + checks.count { it.level != Level.OK }
                 if (problems > 0) {
                     Spacer(Modifier.height(16.dp))
-                    Glass(dark, Modifier.align(Alignment.CenterHorizontally).clickable { checking = true }) {
+                    Glass(dark, Modifier.align(Alignment.CenterHorizontally).clickable { page = Page.CHECK }) {
                         Text("⚠  Найдено проблем: $problems — проверить", fontSize = 14.sp,
                              modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp))
                     }
@@ -267,7 +280,7 @@ class MainActivity : ComponentActivity() {
 
     @Composable
     private fun CheckScreen(dark: Boolean) {
-        androidx.activity.compose.BackHandler { checking = false }
+        androidx.activity.compose.BackHandler { page = Page.MAIN }
         val dim = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
         val bg = if (dark) listOf(Color(0xFF0E1726), Color(0xFF1B1530), Color(0xFF0B1F24))
                  else listOf(Color(0xFFDDE8FF), Color(0xFFF3E6FF), Color(0xFFDDF6F0))
@@ -276,7 +289,7 @@ class MainActivity : ComponentActivity() {
                        verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 item {
                     Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                        IconButton(onClick = { checking = false }) {
+                        IconButton(onClick = { page = Page.MAIN }) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, "Назад")
                         }
                         Text("Проверка сети", fontSize = 22.sp, fontWeight = FontWeight.SemiBold,
@@ -400,8 +413,27 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+/** "Connected for 1:02:03", ticking once a second. */
 @Composable
-private fun Glass(dark: Boolean, modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
+private fun ColumnScope.ConnectedFor(since: Long) {
+    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(since) {
+        while (true) { now = System.currentTimeMillis(); kotlinx.coroutines.delay(1000 - now % 1000) }
+    }
+    Text(elapsed(now - since), fontSize = 28.sp, fontWeight = FontWeight.Light,
+         style = androidx.compose.ui.text.TextStyle(fontFeatureSettings = "tnum"),   // digits don't jitter
+         modifier = Modifier.align(Alignment.CenterHorizontally).padding(top = 2.dp))
+}
+
+internal fun elapsed(ms: Long): String {
+    val t = (ms / 1000).coerceAtLeast(0)
+    val d = t / 86400
+    val hms = "%d:%02d:%02d".format(t / 3600 % 24, t / 60 % 60, t % 60)
+    return if (d > 0) "$d д $hms" else hms
+}
+
+@Composable
+internal fun Glass(dark: Boolean, modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
     val shape = RoundedCornerShape(24.dp)
     Column(modifier.clip(shape)
         .background(if (dark) Color.White.copy(alpha = 0.06f) else Color.White.copy(alpha = 0.45f))
