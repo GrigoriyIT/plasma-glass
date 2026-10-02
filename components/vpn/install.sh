@@ -31,5 +31,7 @@ sudo install -m 644 "$HERE/50-glassvpn-resolved.rules" /etc/polkit-1/rules.d/50-
 
 install -Dm 755 "$HERE/glassvpn.py" ~/.local/bin/glassvpn
 install -Dm 644 "$HERE/glassvpn.desktop" ~/.local/share/applications/glassvpn.desktop
-install -Dm 644 "$HERE/glassvpn.desktop" ~/.config/autostart/glassvpn.desktop
+# absolute Exec: at login ~/.local/bin is not on PATH yet, so "Exec=glassvpn" is skipped
+mkdir -p ~/.config/autostart
+sed "s#^Exec=.*#Exec=$HOME/.local/bin/glassvpn#" "$HERE/glassvpn.desktop" > ~/.config/autostart/glassvpn.desktop
 echo "Installed. Start it from the menu (Glass VPN) and add a subscription from the tray icon."

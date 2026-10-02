@@ -137,6 +137,13 @@ def decode_subscription(body):
     return servers
 
 
+def sub_label(url):
+    """host plus a short tail of the path; the rest of the URL (the token) stays hidden."""
+    u = urllib.parse.urlsplit(url)
+    tail = u.path.rstrip("/").rsplit("/", 1)[-1]
+    return u.hostname + (f"/…{tail[-4:]}" if tail else "")
+
+
 def fetch_subscription(url):
     req = urllib.request.Request(url, headers={"User-Agent": "sing-box glassvpn/1.0"})
     with urllib.request.urlopen(req, timeout=20) as r:
@@ -507,6 +514,9 @@ class Tray:
         if self.settings.get("autoconnect") and self.current():
             QTimer.singleShot(1500, self.connect)
         QTimer.singleShot(4000, lambda: self.update_subscriptions(quiet=True))
+        # repair an autostart entry written with a bare "Exec=glassvpn"
+        if not IS_MAC and AUTOSTART.exists() and "Exec=glassvpn\n" in AUTOSTART.read_text():
+            AUTOSTART.write_text(LINUX_AUTOSTART)
 
     # icons: monochrome symbolic icons so the adaptive top bar recolors them
     def icon(self, up=None):
@@ -605,8 +615,7 @@ class Tray:
         sm.addAction("Проверить задержку").triggered.connect(self.test_latency)
 
         m.addSeparator()
-        m.addAction("Добавить подписку или ключ…").triggered.connect(self.add_subscription)
-        m.addAction("Обновить подписки").triggered.connect(lambda: self.update_subscriptions(quiet=False))
+        self.build_sources_menu(m.addMenu("Подписки и ключи"))
         ac = m.addAction("Подключаться при входе")
         ac.setCheckable(True)
         ac.setChecked(AUTOSTART.exists() and self.settings.get("autoconnect", True))
@@ -617,6 +626,61 @@ class Tray:
         m.addSeparator()
         m.addAction("Выход").triggered.connect(self.quit)
         self.refresh_icon()
+
+    def build_sources_menu(self, sm):
+        subs = self.settings.get("subscriptions", [])
+        if subs:
+            sm.addSection("Подписки")
+        for url in subs:
+            n = sum(1 for s in self.servers if s.get("sub") == url)
+            sub = sm.addMenu(f"{sub_label(url)}  ·  {n} серв.")
+            sub.addAction("Обновить").triggered.connect(lambda _=False, u=url: self.update_subscriptions(False, [u]))
+            sub.addAction("Удалить…").triggered.connect(lambda _=False, u=url: self.remove_subscription(u))
+        keys = [s for s in self.servers if s.get("manual")]
+        if keys:
+            sm.addSection("Ключи")
+        for s in keys:
+            k = sm.addMenu(s["name"])
+            k.addAction("Удалить…").triggered.connect(lambda _=False, n=s["name"]: self.remove_key(n))
+        if subs or keys:
+            sm.addSeparator()
+        sm.addAction("Добавить подписку или ключ…").triggered.connect(self.add_subscription)
+        upd = sm.addAction("Обновить все подписки")
+        upd.setEnabled(bool(subs))
+        upd.triggered.connect(lambda: self.update_subscriptions(quiet=False))
+
+    def confirm(self, text):
+        return QMessageBox.question(None, "Glass VPN", text) == QMessageBox.StandardButton.Yes
+
+    def servers_removed(self):
+        """After a delete: keep the selection valid and move the tunnel if its server is gone."""
+        save(SERVERS, self.servers)
+        names = {s["name"] for s in self.servers}
+        if self.settings.get("selected") not in names:
+            self.settings["selected"] = self.servers[0]["name"] if self.servers else None
+            save(SETTINGS, self.settings)
+            if self.want_up:
+                self.stop_process()
+                if self.servers:
+                    self.connect()
+                else:
+                    self.disconnect()
+        self.sig.servers_changed.emit()
+
+    def remove_subscription(self, url):
+        n = sum(1 for s in self.servers if s.get("sub") == url)
+        if not self.confirm(f"Удалить подписку {sub_label(url)} и её серверы ({n})?"):
+            return
+        self.settings["subscriptions"] = [u for u in self.settings.get("subscriptions", []) if u != url]
+        save(SETTINGS, self.settings)
+        self.servers = [s for s in self.servers if s.get("sub") != url]
+        self.servers_removed()
+
+    def remove_key(self, name):
+        if not self.confirm(f"Удалить ключ «{name}»?"):
+            return
+        self.servers = [s for s in self.servers if not (s.get("manual") and s["name"] == name)]
+        self.servers_removed()
 
     def on_click(self, reason):
         # on macOS a click opens the menu, as with every menu bar item
@@ -649,30 +713,36 @@ class Tray:
         else:
             self.sig.servers_changed.emit()
 
-    def update_subscriptions(self, quiet):
-        subs = list(self.settings.get("subscriptions", []))
+    def update_subscriptions(self, quiet, only=None):
+        subs = list(only or self.settings.get("subscriptions", []))
         if not subs:
             if not quiet:
                 self.notify("Glass VPN", "Подписок нет — добавьте ссылку.")
             return
 
         def work():
-            fresh, errors = [], []
+            got, errors = {}, []
             for url in subs:
                 try:
-                    fresh += fetch_subscription(url)
+                    servers = fetch_subscription(url)
+                    for sv in servers:
+                        sv["sub"] = url
+                    got[url] = servers
                 except Exception as e:  # network, HTTP, decoding
-                    errors.append(str(e))
-            if fresh:
-                manual = [s for s in self.servers if s.get("manual")]
-                names = {s["name"] for s in fresh}
-                self.servers = fresh + [s for s in manual if s["name"] not in names]
+                    errors.append(f"{sub_label(url)}: {e}")
+            if got:
+                # replace only the servers of the subscriptions that answered
+                keep = [sv for sv in self.servers if sv.get("sub") not in got]
+                fresh = [sv for url in got for sv in got[url]]
+                names = {sv["name"] for sv in fresh}
+                self.servers = fresh + [sv for sv in keep if sv["name"] not in names]
                 save(SERVERS, self.servers)
                 self.sig.servers_changed.emit()
                 if not quiet:
-                    self.sig.message.emit("Glass VPN", f"Серверов: {len(fresh)}")
+                    self.sig.message.emit("Glass VPN", f"Обновлено, серверов: {len(fresh)}"
+                                          + (f". Ошибки: {'; '.join(errors)[:150]}" if errors else ""))
             elif not quiet:
-                self.sig.message.emit("Glass VPN", "Не удалось обновить подписки: " + "; ".join(errors)[:200])
+                self.sig.message.emit("Glass VPN", "Не удалось обновить: " + "; ".join(errors)[:200])
         threading.Thread(target=work, daemon=True).start()
 
     def test_latency(self):
@@ -773,8 +843,7 @@ class Tray:
             AUTOSTART.write_text(MAC_LAUNCH_AGENT.format(app=Path.home() / "Applications/Glass VPN.app"))
         elif on:
             AUTOSTART.parent.mkdir(parents=True, exist_ok=True)
-            AUTOSTART.write_text("[Desktop Entry]\nType=Application\nName=Glass VPN\n"
-                                 "Exec=glassvpn\nIcon=network-vpn\nX-GNOME-Autostart-enabled=true\n")
+            AUTOSTART.write_text(LINUX_AUTOSTART)
         elif AUTOSTART.exists():
             AUTOSTART.unlink()
 
@@ -782,6 +851,12 @@ class Tray:
         self.stop_process()
         self.app.quit()
 
+
+# Absolute Exec: the XDG autostart generator runs before ~/.local/bin is on PATH
+# and silently skips entries whose binary it can't find.
+LINUX_AUTOSTART = (f"[Desktop Entry]\nType=Application\nName=Glass VPN\n"
+                   f"Exec={Path(os.path.abspath(sys.argv[0]))}\nIcon=network-vpn\n"
+                   f"StartupNotify=false\nX-GNOME-Autostart-enabled=true\n")
 
 MAC_LAUNCH_AGENT = """<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
