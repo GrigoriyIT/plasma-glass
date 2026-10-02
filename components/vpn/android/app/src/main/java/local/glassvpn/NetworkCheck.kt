@@ -1,6 +1,7 @@
 package local.glassvpn
 
 import android.Manifest
+import android.app.AppOpsManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ApplicationInfo
@@ -8,13 +9,18 @@ import android.content.pm.PackageManager
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.net.Uri
+import android.os.Build
 import android.os.PowerManager
+import android.os.Process
 import android.provider.Settings
 
 // An app can't uninstall others or change system network settings by itself: each
 // check opens the system dialog or screen where the user makes the change.
 
-enum class Level { OK, WARN, BAD }
+/** INFO: shown with a button, but not a problem (e.g. something the system won't let us check). */
+enum class Level { OK, INFO, WARN, BAD }
+
+val Check.isProblem get() = level == Level.WARN || level == Level.BAD
 
 data class Check(
     val title: String,
@@ -98,10 +104,7 @@ fun networkChecks(ctx: Context, vpnOn: Boolean): List<Check> {
     // or notification settings (their screens are empty stubs there)
     if (isTv(ctx)) return out
     val pkgUri = Uri.parse("package:${ctx.packageName}")
-    out += if (ctx.getSystemService(PowerManager::class.java).isIgnoringBatteryOptimizations(ctx.packageName))
-        Check("Работа в фоне", "Без ограничений", Level.OK)
-    else Check("Работа в фоне", "Android может останавливать VPN при экономии заряда", Level.WARN,
-               "Разрешить", Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, pkgUri))
+    out += backgroundChecks(ctx)
 
     out += if (cm.restrictBackgroundStatus == ConnectivityManager.RESTRICT_BACKGROUND_STATUS_ENABLED)
         Check("Экономия трафика", "Включена: фоновые соединения могут обрываться", Level.WARN,
@@ -120,3 +123,47 @@ fun networkChecks(ctx: Context, vpnOn: Boolean): List<Check> {
 /** Android has no public way to open "Reset network settings" directly: open Settings and say where. */
 val RESET_HINT = "Система → Сброс настроек → «Сбросить настройки Wi-Fi, мобильного интернета и Bluetooth». " +
     "Удалятся сохранённые пароли Wi-Fi, пары Bluetooth и VPN-профили других приложений."
+
+private val isXiaomi = Build.MANUFACTURER.equals("Xiaomi", ignoreCase = true) ||
+    Build.BRAND.lowercase() in setOf("xiaomi", "redmi", "poco")
+
+/**
+ * MIUI/HyperOS "Autostart" (app op 10008). Without it Xiaomi won't let the VPN come up after a
+ * reboot or be restarted after being killed. Null if the op can't be read.
+ */
+private fun miuiAutostart(ctx: Context): Boolean? = try {
+    val ops = ctx.getSystemService(AppOpsManager::class.java)
+    val check = AppOpsManager::class.java.getMethod("checkOpNoThrow", Int::class.java, Int::class.java, String::class.java)
+    (check.invoke(ops, 10008, Process.myUid(), ctx.packageName) as Int) == AppOpsManager.MODE_ALLOWED
+} catch (e: Exception) {
+    null
+}
+
+/**
+ * Background limits. Xiaomi swaps Android's battery-optimisation dialog for its own "Activity
+ * control" page, whose "No restrictions" never reaches Android's list and can't be read by apps
+ * (not even over adb) — so there it is a hint, not a warning, and Autostart is what gets checked.
+ */
+fun backgroundChecks(ctx: Context): List<Check> {
+    val pkgUri = Uri.parse("package:${ctx.packageName}")
+    val battery = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, pkgUri)
+    val unrestricted = ctx.getSystemService(PowerManager::class.java).isIgnoringBatteryOptimizations(ctx.packageName)
+    if (!isXiaomi) {
+        return listOf(if (unrestricted) Check("Работа в фоне", "Без ограничений", Level.OK)
+                      else Check("Работа в фоне", "Android может останавливать VPN при экономии заряда",
+                                 Level.WARN, "Разрешить", battery))
+    }
+    val autostartPage = Intent().setClassName("com.miui.securitycenter",
+                                              "com.miui.permcenter.autostart.AutoStartManagementActivity")
+    val autostart = when (miuiAutostart(ctx)) {
+        true -> Check("Автозапуск", "Разрешён", Level.OK)
+        false -> Check("Автозапуск", "Выключен: Xiaomi не даст VPN подняться после перезагрузки и " +
+                       "перезапуститься после сбоя. Включите Glass VPN в списке", Level.WARN, "Включить", autostartPage)
+        null -> Check("Автозапуск", "Xiaomi не даёт это проверить — включите Glass VPN в списке автозапуска",
+                      Level.INFO, "Открыть", autostartPage)
+    }
+    val background = if (unrestricted) Check("Работа в фоне", "Без ограничений", Level.OK)
+        else Check("Работа в фоне", "Xiaomi не даёт приложениям проверить эту настройку. " +
+                   "В «Контроле активности» должно стоять «Нет ограничений»", Level.INFO, "Открыть", battery)
+    return listOf(autostart, background)
+}

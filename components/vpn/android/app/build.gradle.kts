@@ -18,8 +18,8 @@ android {
         applicationId = "local.glassvpn"
         minSdk = 28          // Android 9 (e.g. Xiaomi TV Box S); see the manifest for hev
         targetSdk = 36
-        versionCode = 4
-        versionName = "1.3"
+        versionCode = 5
+        versionName = "1.3.1"
     }
 
     signingConfigs {

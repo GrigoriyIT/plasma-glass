@@ -246,7 +246,7 @@ class MainActivity : ComponentActivity() {
                 Spacer(Modifier.height(16.dp))
                 StatusBlock(st)
 
-                val problems = vpnApps.size + checks.count { it.level != Level.OK }
+                val problems = vpnApps.size + checks.count { it.isProblem }
                 if (problems > 0) {
                     Spacer(Modifier.height(16.dp))
                     Glass(dark, Modifier.align(Alignment.CenterHorizontally).focusRing(RoundedCornerShape(24.dp)) { page = Page.CHECK }) {
@@ -287,7 +287,7 @@ class MainActivity : ComponentActivity() {
                         .focusProperties { right = addButton }) { toggle(st.state) }
                     Spacer(Modifier.height(12.dp))
                     StatusBlock(st)
-                    val problems = vpnApps.size + checks.count { it.level != Level.OK }
+                    val problems = vpnApps.size + checks.count { it.isProblem }
                     if (problems > 0) {
                         Spacer(Modifier.height(12.dp))
                         PillButton("⚠  Найдено проблем: $problems", dark) { page = Page.CHECK }
@@ -396,6 +396,7 @@ class MainActivity : ComponentActivity() {
                             for (c in checks) Row(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
                                 Box(Modifier.padding(top = 6.dp).size(10.dp).clip(CircleShape).background(Color(stateColor(when (c.level) {
                                     Level.OK -> VpnState.ON
+                                    Level.INFO -> VpnState.OFF
                                     Level.WARN -> VpnState.CONNECTING
                                     Level.BAD -> VpnState.ERROR
                                 }))))

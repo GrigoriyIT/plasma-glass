@@ -88,9 +88,7 @@ internal fun SettingsScreen(dark: Boolean, store: Store, onBack: () -> Unit, onA
         lifecycle.lifecycle.addObserver(obs)
         onDispose { lifecycle.lifecycle.removeObserver(obs) }
     }
-    val unrestricted = remember(resumed) {
-        ctx.getSystemService(PowerManager::class.java).isIgnoringBatteryOptimizations(ctx.packageName)
-    }
+    val background = remember(resumed) { backgroundChecks(ctx) }
     val excludedCount = remember(resumed) { store.excluded.size }
 
     Backdrop(dark) {
@@ -131,11 +129,8 @@ internal fun SettingsScreen(dark: Boolean, store: Store, onBack: () -> Unit, onA
                                    "adb shell settings put secure always_on_vpn_app ${ctx.packageName}") {}
                         return@Glass
                     }
-                    SettingRow("Работа в фоне",
-                               if (unrestricted) "Без ограничений" else "Android может останавливать VPN при экономии заряда",
-                               action = if (unrestricted) null else "Разрешить") {
-                        if (!unrestricted) open(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
-                                                       Uri.parse("package:${ctx.packageName}")))
+                    for (c in background) {
+                        SettingRow(c.title, c.detail, action = c.fixLabel) { c.fix?.let(open) }
                     }
                     SettingRow("Постоянная VPN",
                                "Самый надёжный способ: система сама держит Glass VPN включённым и поднимает " +
