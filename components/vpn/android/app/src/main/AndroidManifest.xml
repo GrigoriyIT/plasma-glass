@@ -17,7 +17,12 @@
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"
         tools:ignore="QueryAllPackagesPermission" />
 
+    <!-- also an Android TV app: no touchscreen needed, launcher entry with a banner -->
+    <uses-feature android:name="android.software.leanback" android:required="false" />
+    <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
+
     <application
+        android:banner="@drawable/banner"
         android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"
         android:label="Glass VPN"
@@ -31,6 +36,7 @@
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
+                <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
             </intent-filter>
             <!-- "Share" a subscription link or keys from a messenger -->
             <intent-filter>

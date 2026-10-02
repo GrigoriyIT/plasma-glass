@@ -55,13 +55,13 @@ internal fun TitleBar(title: String, onBack: () -> Unit, actions: @Composable Ro
 private fun SettingRow(title: String, detail: String, checked: Boolean? = null, action: String? = null,
                        onClick: () -> Unit) {
     val dim = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
-    Row(Modifier.fillMaxWidth().clip14().clickable(onClick = onClick).padding(horizontal = 12.dp, vertical = 10.dp),
+    Row(Modifier.fillMaxWidth().focusRing(onClick = onClick).padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text(title, fontSize = 15.sp)
             Text(detail, fontSize = 13.sp, color = dim)
         }
-        if (checked != null) Switch(checked = checked, onCheckedChange = { onClick() })
+        if (checked != null) Switch(checked = checked, onCheckedChange = null)   // the row is the control
         if (action != null) Text(action, fontSize = 14.sp, color = MaterialTheme.colorScheme.primary,
                                  modifier = Modifier.padding(start = 8.dp))
     }
@@ -101,7 +101,7 @@ internal fun SettingsScreen(dark: Boolean, store: Store, onBack: () -> Unit, onA
                                checked = autoConnect) {
                         autoConnect = !autoConnect; store.autoConnect = autoConnect
                     }
-                    SettingRow("Запускать при включении телефона", "VPN подключается после загрузки",
+                    SettingRow("Запускать при включении устройства", "VPN подключается после загрузки",
                                checked = bootStart) {
                         bootStart = !bootStart; store.bootStart = bootStart
                     }
@@ -118,6 +118,12 @@ internal fun SettingsScreen(dark: Boolean, store: Store, onBack: () -> Unit, onA
                 Glass(dark, Modifier.fillMaxWidth().padding(bottom = 16.dp)) {
                     Text("Надёжная работа", fontWeight = FontWeight.Medium, fontSize = 16.sp,
                          modifier = Modifier.padding(start = 12.dp, top = 8.dp))
+                    if (isTv(ctx)) {
+                        SettingRow("Постоянная VPN",
+                                   "В настройках Android TV этого пункта нет. Включается один раз с компьютера: " +
+                                   "adb shell settings put secure always_on_vpn_app ${ctx.packageName}") {}
+                        return@Glass
+                    }
                     SettingRow("Работа в фоне",
                                if (unrestricted) "Без ограничений" else "Android может останавливать VPN при экономии заряда",
                                action = if (unrestricted) null else "Разрешить") {
@@ -168,14 +174,14 @@ internal fun AppsScreen(dark: Boolean, store: Store, onBack: (changed: Boolean) 
             OutlinedTextField(query, { query = it }, Modifier.fillMaxWidth(), singleLine = true,
                               placeholder = { Text("Поиск") })
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 4.dp)) {
-                Row(Modifier.clip14().clickable { showSystem = !showSystem }.padding(end = 12.dp),
+                Row(Modifier.focusRing { showSystem = !showSystem }.padding(end = 12.dp),
                     verticalAlignment = Alignment.CenterVertically) {
                     Checkbox(showSystem, null)
                     Text("Показать системные", fontSize = 14.sp)
                 }
                 Spacer(Modifier.weight(1f))
-                if (excluded.isNotEmpty()) TextButton(onClick = { excluded = emptySet(); store.excluded = excluded }) {
-                    Text("Сбросить (${excluded.size})")
+                if (excluded.isNotEmpty()) LinkButton("Сбросить (${excluded.size})") {
+                    excluded = emptySet(); store.excluded = excluded
                 }
             }
             Glass(dark, Modifier.fillMaxWidth().weight(1f).padding(bottom = 16.dp)) {
@@ -191,7 +197,7 @@ internal fun AppsScreen(dark: Boolean, store: Store, onBack: (changed: Boolean) 
                     LazyColumn {
                         items(shown, key = { it.pkg }) { app ->
                             val on = app.pkg in excluded
-                            Row(Modifier.fillMaxWidth().clip14().clickable {
+                            Row(Modifier.fillMaxWidth().focusRing {
                                     excluded = if (on) excluded - app.pkg else excluded + app.pkg
                                     store.excluded = excluded
                                 }.padding(horizontal = 10.dp, vertical = 8.dp),

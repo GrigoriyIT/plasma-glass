@@ -12,6 +12,7 @@ import android.net.LinkProperties
 import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.VpnService
+import android.os.Build
 import android.os.ParcelFileDescriptor
 import android.os.PowerManager
 import android.service.quicksettings.TileService
@@ -126,7 +127,12 @@ class GlassVpnService : VpnService() {
         }
         // ACTION_CONNECT, always-on (android.net.VpnService) or a sticky restart
         val st = status.value.takeIf { it.state != VpnState.OFF } ?: VpnStatus(VpnState.CONNECTING)
-        startForeground(NOTIFY_ID, notification(st), ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+        // the specialUse type exists from Android 14; older systems reject unknown types
+        if (Build.VERSION.SDK_INT >= 34) {
+            startForeground(NOTIFY_ID, notification(st), ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+        } else {
+            startForeground(NOTIFY_ID, notification(st))
+        }
         val ifDown = intent == null || intent.action != ACTION_CONNECT || intent.getBooleanExtra(EXTRA_IF_DOWN, false)
         worker.execute { if (!(ifDown && running)) connect() }
         return START_STICKY
@@ -349,7 +355,7 @@ class GlassVpnService : VpnService() {
                 else setShowWhen(false)
             }
             .addAction(Notification.Action.Builder(null, "Отключить", stop).build())
-            .setForegroundServiceBehavior(Notification.FOREGROUND_SERVICE_IMMEDIATE)
+            .apply { if (Build.VERSION.SDK_INT >= 31) setForegroundServiceBehavior(Notification.FOREGROUND_SERVICE_IMMEDIATE) }
             .build()
     }
 

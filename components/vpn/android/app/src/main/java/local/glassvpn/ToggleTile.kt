@@ -22,7 +22,8 @@ class ToggleTile : TileService() {
             if (Build.VERSION.SDK_INT >= 34) {
                 startActivityAndCollapse(PendingIntent.getActivity(this, 0, i, PendingIntent.FLAG_IMMUTABLE))
             } else {
-                @Suppress("DEPRECATION") startActivityAndCollapse(i)
+                @Suppress("DEPRECATION") @android.annotation.SuppressLint("StartActivityAndCollapseDeprecated")
+                startActivityAndCollapse(i)
             }
         } else {
             GlassVpnService.start(this)

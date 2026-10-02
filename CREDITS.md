@@ -14,6 +14,8 @@ except where a file below says it is derived from one of them.
 | [Xray-core](https://github.com/XTLS/Xray-core) by XTLS | MPL-2.0 | VLESS client for Glass VPN (downloaded by its installer) |
 | [AndroidLibXrayLite](https://github.com/2dust/AndroidLibXrayLite) by 2dust | LGPL-3.0 | Xray-core packaged for Android (Glass VPN for Android, downloaded by `fetch-libs.sh`) |
 | [hev-socks5-tunnel](https://github.com/heiher/hev-socks5-tunnel) by heiher | MIT | TUN → SOCKS5 for Glass VPN for Android (downloaded by `fetch-libs.sh`) |
+| [ZXing](https://github.com/zxing/zxing) | Apache-2.0 | QR codes in Glass VPN for Android (TV "add from phone"), bundled in the APK |
+| [Inter](https://github.com/rsms/inter) by Rasmus Andersson | SIL OFL 1.1 | Lettering of the Android TV banner (`make-banner.py`; the font itself isn't bundled) |
 | [Guake](https://github.com/Guake/guake) | GPL-2.0-or-later | Drop-down terminal |
 | [Panel Colorizer](https://github.com/luisbocanegra/plasma-panel-colorizer) by Luis Bocanegra | GPL-3.0 | Top bar transparency and recolouring (installed by MacTahoe) |
 

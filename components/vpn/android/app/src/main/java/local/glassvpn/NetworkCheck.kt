@@ -94,7 +94,9 @@ fun networkChecks(ctx: Context, vpnOn: Boolean): List<Check> {
               Level.WARN, "Открыть Wi-Fi", Intent(Settings.ACTION_WIFI_SETTINGS))
     else Check("Прокси", "Нет", Level.OK)
 
-    // background limits that kill or starve a VPN
+    // background limits that kill or starve a VPN; a TV has no battery saver, Data Saver
+    // or notification settings (their screens are empty stubs there)
+    if (isTv(ctx)) return out
     val pkgUri = Uri.parse("package:${ctx.packageName}")
     out += if (ctx.getSystemService(PowerManager::class.java).isIgnoringBatteryOptimizations(ctx.packageName))
         Check("Работа в фоне", "Без ограничений", Level.OK)

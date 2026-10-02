@@ -75,6 +75,11 @@ Xray in-process ([AndroidLibXrayLite](https://github.com/2dust/AndroidLibXrayLit
   was on), and apps that bypass the tunnel: the system routes them, DNS included, outside the VPN
   (with "Block connections without VPN" they get no network at all). Time connected on the main
   screen and as a chronometer in the notification.
+- Android TV: launcher banner (`make-banner.py`, Inter font), a two-pane remote-friendly screen with a
+  clear focus ring, and "Add" shows a QR code — the phone opens a page the TV serves on the LAN (one
+  secret path, only while the dialog is open) and pastes the subscription there. Settings and checks
+  that Android TV lacks are hidden; always-on is set once with
+  `adb shell settings put secure always_on_vpn_app local.glassvpn`.
 - Keeps itself running: a sticky foreground service that comes back if the system kills it, and a
   watchdog that restarts Xray (re-resolving the server) when it stops or the server has been silent
   for 30 s, backing off up to 5 min.

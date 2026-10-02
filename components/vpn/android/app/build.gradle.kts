@@ -18,8 +18,8 @@ android {
         applicationId = "local.glassvpn"
         minSdk = 29          // hev-socks5-tunnel's floor
         targetSdk = 36
-        versionCode = 2
-        versionName = "1.1"
+        versionCode = 3
+        versionName = "1.2"
     }
 
     signingConfigs {
@@ -44,7 +44,7 @@ android {
         abi {
             isEnable = true
             reset()
-            include("arm64-v8a", "armeabi-v7a", "x86_64")
+            include("arm64-v8a", "armeabi-v7a", "x86_64", "x86")
             isUniversalApk = false
         }
     }
@@ -71,6 +71,7 @@ dependencies {
     implementation("androidx.compose.material:material-icons-core")
     implementation("androidx.activity:activity-compose:1.13.0")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.11.0")
+    implementation("com.google.zxing:core:3.5.4")   // QR code for adding a subscription from a phone (TV)
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20260814")
