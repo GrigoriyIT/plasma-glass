@@ -491,6 +491,9 @@ class Tray:
         self.probing = False
         self.fails = 0
         self.last_bytes = None
+        self.last_tick = time.time()      # wall clock: a jump means the machine slept
+        self.last_reconnect = 0.0
+        self.reconnect_gap = 30           # seconds between automatic reconnects, doubles up to 5 min
         self.rates = (0.0, 0.0)
         self.settings = load(SETTINGS, {"subscriptions": [], "selected": None, "autoconnect": True})
         self.servers = load(SERVERS, [])
@@ -546,6 +549,12 @@ class Tray:
             self.tray.setIcon(draw_icon(self.state, self.fg, self.phase))
 
     def tick(self):
+        now = time.time()
+        slept, self.last_tick = now - self.last_tick > 20, now
+        if slept and self.want_up:
+            # after sleep the network often comes back with another address and the
+            # long-lived links (Xray's gRPC, DoH) hang instead of failing: start afresh
+            QTimer.singleShot(5000, self.reconnect)
         fg = panel_text_color()
         if fg != self.fg:
             self.fg = fg
@@ -569,12 +578,23 @@ class Tray:
             return
         if ms is not None:
             self.fails, self.probe_ms = 0, ms
+            self.reconnect_gap = 30
             self.set_state(ON)
         else:
             self.fails += 1
             # give a fresh connection a few seconds before calling it broken
             if self.fails >= 3:
                 self.set_state(ERROR)
+            # still broken: the network may have changed under the cores — restart them,
+            # backing off while there is no network at all
+            if self.fails >= 6 and time.time() - self.last_reconnect >= self.reconnect_gap:
+                self.reconnect_gap = min(self.reconnect_gap * 2, 300)
+                self.reconnect()
+
+    def reconnect(self):
+        if self.want_up:
+            self.last_reconnect = time.time()
+            self.connect()
 
     def current(self):
         sel = self.settings.get("selected")
