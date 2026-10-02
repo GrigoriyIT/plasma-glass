@@ -30,7 +30,8 @@ g guake.style.font palette-name "Custom"
 g guake.style.font palette "#232627:#ed1515:#11d116:#f67400:#1d99f3:#9b59b6:#1abc9c:#fcfcfc:#7f8c8d:#c0392b:#1cdc9a:#fdbc4b:#3daee9:#8e44ad:#16a085:#ffffff:#dedede:#1f1f1f"
 g guake.style.font bold-is-bright false
 g guake.style.background transparency 90
-g guake.keybindings.global show-hide ""
+g guake.keybindings.global show-hide disabled   # "" makes Guake nag at login
+g guake.keybindings.global show-focus disabled
 
 # 2. Vertical slide effect
 mkdir -p ~/.local/share/kwin/effects
