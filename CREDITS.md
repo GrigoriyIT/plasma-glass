@@ -12,6 +12,8 @@ except where a file below says it is derived from one of them.
 | [KDE Rounded Corners](https://github.com/matinlotfali/KDE-Rounded-Corners) by Matin Lotfaliei | GPL-3.0 | Corner clipping and the 1 px window outline (installed by MacTahoe) |
 | [sing-box](https://github.com/SagerNet/sing-box) by SagerNet | GPL-3.0-or-later | VPN core for Glass VPN (downloaded by its installer) |
 | [Xray-core](https://github.com/XTLS/Xray-core) by XTLS | MPL-2.0 | VLESS client for Glass VPN (downloaded by its installer) |
+| [AndroidLibXrayLite](https://github.com/2dust/AndroidLibXrayLite) by 2dust | LGPL-3.0 | Xray-core packaged for Android (Glass VPN for Android, downloaded by `fetch-libs.sh`) |
+| [hev-socks5-tunnel](https://github.com/heiher/hev-socks5-tunnel) by heiher | MIT | TUN → SOCKS5 for Glass VPN for Android (downloaded by `fetch-libs.sh`) |
 | [Guake](https://github.com/Guake/guake) | GPL-2.0-or-later | Drop-down terminal |
 | [Panel Colorizer](https://github.com/luisbocanegra/plasma-panel-colorizer) by Luis Bocanegra | GPL-3.0 | Top bar transparency and recolouring (installed by MacTahoe) |
 

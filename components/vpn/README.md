@@ -46,3 +46,39 @@ automatic rollback; `macos/make-icon.py` draws the app icon.
 The app bundle's executable is a copy of the Python launcher (script passed via `LSEnvironment` and
 `sitecustomize.py`): macOS 26 silently drops the menu bar item of an app whose executable is a shell
 script that execs Python.
+
+## Android
+
+```bash
+cd components/vpn/android
+./fetch-libs.sh                 # Xray (libv2ray.aar) and hev-socks5-tunnel, pinned + sha256
+./gradlew assembleRelease       # app/build/outputs/apk/release/app-arm64-v8a-release.apk
+```
+
+Same routing as the desktop client, on Android's `VpnService` (Android 10+):
+TUN → [hev-socks5-tunnel](https://github.com/heiher/hev-socks5-tunnel) → SOCKS5 on 127.0.0.1 →
+Xray in-process ([AndroidLibXrayLite](https://github.com/2dust/AndroidLibXrayLite)) → VLESS.
+
+- Russian sites (`.ru`, `.рф`, `.su`, `geosite:category-ru`, `geoip:ru`) and the LAN go direct.
+- DNS: hev answers every query with an address from 198.19.0.0/16 and hands Xray the name, so
+  routing is by domain and blocked names are resolved on the server side. Direct names are resolved
+  through the physical network's DNS server (Go has no system resolver on Android); Xray restarts
+  with the new one when the network changes.
+- The app is excluded from its own VPN, so Xray reaches the server without looping.
+- The local SOCKS5 port is random and password-protected for each connection: some apps look for
+  open local proxies to detect a VPN.
+- IPv4 only: no IPv6 route is added, so Android blocks IPv6 for tunnelled apps rather than leaking it.
+- Shield button with the same status colours as the tray icon; the live check fetches
+  `generate_204` through Xray every 4 s while the screen is on. Speed and latency in the notification.
+- Quick Settings tile; "Always-on VPN" and "Block connections without VPN" in the system settings work.
+- Network check (menu, or the "problems found" chip on the main screen): lists other VPN apps
+  (found by their `BIND_VPN_SERVICE` service, hence `QUERY_ALL_PACKAGES` — fine outside Google Play)
+  and checks internet / captive portal, another active VPN, a fixed Private DNS server (bypasses the
+  mapped DNS, so routing falls back to IPs), a leftover proxy, battery optimisation, Data Saver and
+  notifications. Android doesn't let an app uninstall others or change these settings, so each item
+  opens the system uninstall dialog or the right settings screen ("Remove all" chains the dialogs);
+  for a full network reset it opens Settings and says where the reset is.
+
+A release key goes in `keystore.properties` (not committed): `storeFile`, `storePassword`,
+`keyAlias`, `keyPassword`. Without it the release APK is unsigned; `assembleDebug` signs with the
+debug key.
