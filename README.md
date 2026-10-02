@@ -57,6 +57,7 @@ KWin upgrade.
 | [`components/clock-wallpaper`](components/clock-wallpaper) | Wallpaper plugin: image + large clock |
 | [`components/adaptive-panel`](components/adaptive-panel) | Top bar text/icon colour follows the wallpaper |
 | [`components/gestures`](components/gestures) | Touchpad gestures (InputActions config + *App Cycle* KWin script) |
+| [`components/edge-snap`](components/edge-snap) | Wider side-edge zone for half-screen snapping, smaller quarter-tile corners |
 | [`components/guake`](components/guake) | Drop-down Guake with a vertical slide effect |
 | [`components/chrome-fontconfig-fix`](components/chrome-fontconfig-fix) | Keeps Chrome from breaking the system font cache |
 | [`components/vpn`](components/vpn) | *Glass VPN*: tray client for VLESS subscriptions on sing-box, Russian sites and LAN direct |

@@ -1,0 +1,14 @@
+{
+    "KPackageStructure": "KWin/Script",
+    "KPlugin": {
+        "Authors": [{ "Name": "Plasma Glass contributors" }],
+        "Description": "Snap a dragged window to half the screen when it is dropped near a side edge, not only within 20 px of it",
+        "EnabledByDefault": false,
+        "Id": "edgesnap",
+        "License": "GPL",
+        "Name": "Wide Edge Snap",
+        "Version": "1.0"
+    },
+    "X-Plasma-API": "javascript",
+    "X-Plasma-MainScript": "code/main.js"
+}
