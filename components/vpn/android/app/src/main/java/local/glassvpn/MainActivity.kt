@@ -334,6 +334,7 @@ class MainActivity : ComponentActivity() {
             VpnState.ON -> listOfNotNull(st.server, st.latency?.let { "$it мс" }).joinToString(" · ") +
                            "\n↓ ${humanRate(st.down)}   ↑ ${humanRate(st.up)}"
             VpnState.ERROR -> st.message ?: st.server
+            VpnState.BYPASS -> "${st.server}\nТрафик идёт мимо VPN, пока сервер не ответит"
             VpnState.CONNECTING -> st.server
             VpnState.OFF -> selected ?: "Добавьте подписку"
         }
@@ -429,7 +430,7 @@ class MainActivity : ComponentActivity() {
     private fun ServerRow(s: Server, isSelected: Boolean, lat: Map<String, Int?>, dark: Boolean) {
         val tint = if (isSelected) (if (dark) Color.White.copy(alpha = 0.10f) else Color.White.copy(alpha = 0.55f))
                    else Color.Transparent
-        Row(Modifier.fillMaxWidth().focusRing { select(s.name) }.background(tint)
+        Row(Modifier.fillMaxWidth().focusRing(zoom = 1f) { select(s.name) }.background(tint)
                 .padding(horizontal = 16.dp, vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically) {
             RadioButton(selected = isSelected, onClick = null, modifier = Modifier.size(20.dp))
@@ -512,7 +513,7 @@ private fun ColumnScope.ShieldButton(state: VpnState, dark: Boolean, modifier: M
         if (state == VpnState.OFF) Color.White.copy(alpha = if (dark) 0.15f else 0.7f) else Color(stateColor(state)),
         label = "ring")
     val fg = if (dark) Color.White else Color(0xFF1C1C1E)
-    Box(modifier.align(Alignment.CenterHorizontally).size(180.dp).focusRing(CircleShape, onClick)
+    Box(modifier.align(Alignment.CenterHorizontally).size(180.dp).focusRing(CircleShape, onClick = onClick)
             .background(Brush.radialGradient(
                 if (dark) listOf(Color.White.copy(alpha = 0.14f), Color.White.copy(alpha = 0.04f))
                 else listOf(Color.White.copy(alpha = 0.9f), Color.White.copy(alpha = 0.4f))))

@@ -71,6 +71,33 @@ class VlessTest {
         System.getenv("GLASSVPN_DUMP")?.let { File(it).writeText(cfg.toString(2)) }
     }
 
+    @Test fun probeAndBypass() {
+        val s = parseVless(reality)!!
+        val socks = Socks(12345, "u", "p", 12346)
+        fun rules(c: JSONObject) = c.getJSONObject("routing").getJSONArray("rules").let { r ->
+            List(r.length()) { r.getJSONObject(it) } }
+        val normal = JSONObject(xrayConfig(s, "203.0.113.7", socks, listOf("192.168.1.1")))
+        val bypass = JSONObject(xrayConfig(s, "203.0.113.7", socks, listOf("192.168.1.1"), bypass = true))
+        // the probe port is a second inbound, routed to the server first in both modes
+        assertEquals(12346, normal.getJSONArray("inbounds").getJSONObject(1).getInt("port"))
+        for (c in listOf(normal, bypass)) {
+            val first = rules(c).first()
+            assertEquals("probe", first.getJSONArray("inboundTag").getString(0))
+            assertEquals("proxy", first.getString("outboundTag"))
+        }
+        // bypass ends with "everything from the apps and DNS goes direct"; normal falls through to proxy
+        val last = rules(bypass).last()
+        assertEquals("direct", last.getString("outboundTag"))
+        assertEquals(listOf("socks", "dns"), last.getJSONArray("inboundTag").let { a -> List(a.length()) { a.getString(it) } })
+        assertEquals(rules(normal).size + 1, rules(bypass).size)
+        // the network's DNS answers Russian names first and is the fallback after DoH
+        val dns = normal.getJSONObject("dns").getJSONArray("servers")
+        assertTrue(dns.get(0) is JSONObject && dns.getJSONObject(0).has("domains"))
+        assertEquals("https://1.1.1.1/dns-query", dns.getString(1))
+        assertFalse(dns.getJSONObject(2).has("domains"))
+        System.getenv("GLASSVPN_DUMP_BYPASS")?.let { File(it).writeText(bypass.toString(2)) }
+    }
+
     @Test fun hevConfigQuotes() {
         val y = hevConfig(Socks(1080, "a'b", "c"))
         assertTrue(y.contains("username: 'a''b'"))

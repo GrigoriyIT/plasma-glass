@@ -32,7 +32,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import kotlinx.coroutines.delay
 
-private val FOCUS = Color(0xFF0A84FF)
+internal val FOCUS = Color(0xFF0A84FF)
 
 fun isTv(ctx: Context): Boolean =
     ctx.packageManager.hasSystemFeature(PackageManager.FEATURE_LEANBACK) ||
@@ -42,31 +42,40 @@ fun isTv(ctx: Context): Boolean =
  * Clickable that shows clearly where the remote's focus is: a coloured ring and a slight
  * zoom. On a phone nothing is focused, so it looks like a plain clickable there.
  */
-fun Modifier.focusRing(shape: Shape = RoundedCornerShape(14.dp), onClick: () -> Unit): Modifier = composed {
-    var focused by remember { mutableStateOf(false) }
-    val zoom by animateFloatAsState(if (focused) 1.04f else 1f, label = "zoom")
-    this.scale(zoom)
-        .onFocusChanged { focused = it.isFocused }
-        // blue, not green: green already means "connected"
-        .border(3.dp, if (focused) FOCUS else Color.Transparent, shape)
-        .clip(shape)
-        .clickable(onClick = onClick)
-}
+fun Modifier.focusRing(shape: Shape = RoundedCornerShape(14.dp), zoom: Float = 1.04f, onClick: () -> Unit): Modifier =
+    composed {
+        var focused by remember { mutableStateOf(false) }
+        // full-width rows pass zoom = 1: zoomed, they would stick out of their card
+        val scale by animateFloatAsState(if (focused) zoom else 1f, label = "zoom")
+        this.scale(scale)
+            .onFocusChanged { focused = it.isFocused }
+            // blue, not green: green already means "connected"
+            .border(3.dp, if (focused) FOCUS else Color.Transparent, shape)
+            .clip(shape)
+            .background(if (focused) FOCUS.copy(alpha = 0.10f) else Color.Transparent)
+            .clickable(onClick = onClick)
+    }
 
 /** Text action that is easy to see focused (Material's text buttons barely change on a TV). */
 @Composable
 fun LinkButton(text: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
     Text(text, fontSize = 14.sp, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Medium,
-         modifier = modifier.focusRing(RoundedCornerShape(10.dp), onClick).padding(horizontal = 10.dp, vertical = 8.dp))
+         modifier = modifier.focusRing(RoundedCornerShape(10.dp), onClick = onClick).padding(horizontal = 10.dp, vertical = 8.dp))
 }
 
 /** Big labelled button for the TV main screen. */
 @Composable
-fun PillButton(text: String, dark: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
+fun PillButton(text: String, dark: Boolean, modifier: Modifier = Modifier, selected: Boolean = false,
+               onClick: () -> Unit) {
     val shape = RoundedCornerShape(50)
     Text(text, fontSize = 16.sp, textAlign = TextAlign.Center,
-         modifier = modifier.focusRing(shape, onClick)
-             .background(if (dark) Color.White.copy(alpha = 0.10f) else Color.White.copy(alpha = 0.6f))
+         color = if (selected) Color.White else Color.Unspecified,
+         modifier = modifier.focusRing(shape, onClick = onClick)
+             .background(when {
+                 selected -> Color(0xFF3A3A3C)       // dark, not blue: blue is the focus
+                 dark -> Color.White.copy(alpha = 0.10f)
+                 else -> Color.White.copy(alpha = 0.6f)
+             })
              .padding(horizontal = 20.dp, vertical = 12.dp))
 }
 

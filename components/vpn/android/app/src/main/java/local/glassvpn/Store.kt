@@ -43,6 +43,11 @@ class Store(context: Context) {
         get() = prefs.getBoolean("boot_start", true)
         set(v) = prefs.edit().putBoolean("boot_start", v).apply()
 
+    /** Server unreachable (e.g. mobile internet on a whitelist): let traffic go direct meanwhile. */
+    var fallbackDirect: Boolean
+        get() = prefs.getBoolean("fallback_direct", true)
+        set(v) = prefs.edit().putBoolean("fallback_direct", v).apply()
+
     /** Packages that bypass the tunnel completely. */
     var excluded: Set<String>
         get() = prefs.getStringSet("excluded", emptySet())!!.toSet()

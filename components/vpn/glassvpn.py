@@ -61,13 +61,15 @@ SB_CONFIG = STATE_DIR / "sing-box.json"
 XRAY_CONFIG = STATE_DIR / "xray.json"
 XRAY_LOG = STATE_DIR / "xray.log"
 SOCKS_PORT = 10808
+PROBE_SOCKS_PORT = 10809        # a second Xray inbound that always goes to the server
 APPLETSRC = Path.home() / ".config/plasma-org.kde.plasma.desktop-appletsrc"
-PROBE_HOST, PROBE_PORT = "www.google.com", 443   # reachable only through the tunnel
+PROBE_HOST = "connectivitycheck.gstatic.com"      # GET /generate_204 through the server
 
 # tray states
-OFF, CONNECTING, ON, ERROR = "off", "connecting", "on", "error"
-STATE_COLOR = {CONNECTING: "#f5b83d", ON: "#34c759", ERROR: "#ff453a"}
-STATE_TEXT = {OFF: "отключено", CONNECTING: "подключение…", ON: "подключено", ERROR: "сервер не отвечает"}
+OFF, CONNECTING, ON, BYPASS, ERROR = "off", "connecting", "on", "bypass", "error"
+STATE_COLOR = {CONNECTING: "#f5b83d", ON: "#34c759", BYPASS: "#ff9f0a", ERROR: "#ff453a"}
+STATE_TEXT = {OFF: "отключено", CONNECTING: "подключение…", ON: "подключено",
+              BYPASS: "напрямую — сервер недоступен", ERROR: "сервер не отвечает"}
 
 RULESET_URL = {
     "geosite-ru": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-category-ru.srs",
@@ -152,8 +154,13 @@ def fetch_subscription(url):
 
 # ------------------------------------------------------- sing-box config --
 
-def xray_config(s, server_ip):
-    """Xray client: SOCKS5 on localhost -> VLESS to the server."""
+def xray_config(s, server_ip, bypass=False):
+    """Xray client: SOCKS5 on localhost -> VLESS to the server.
+
+    A second SOCKS port always goes to the server (the live check). With bypass,
+    the main port sends everything direct: the server is unreachable (e.g. mobile
+    internet on a whitelist) and traffic shouldn't hang on a dead tunnel meanwhile.
+    """
     user = {"id": s["uuid"], "encryption": s.get("encryption") or "none"}
     if s["flow"]:
         user["flow"] = s["flow"]
@@ -176,12 +183,20 @@ def xray_config(s, server_ip):
         stream["xhttpSettings"] = {"path": s["path"] or "/", "host": s["host_header"], "mode": s.get("mode") or "auto"}
     return {
         "log": {"loglevel": "warning", "error": str(XRAY_LOG), "access": "none"},
-        "inbounds": [{"listen": "127.0.0.1", "port": SOCKS_PORT, "protocol": "socks",
-                      "settings": {"udp": True, "auth": "noauth"}}],
+        "inbounds": [{"tag": "socks", "listen": "127.0.0.1", "port": SOCKS_PORT, "protocol": "socks",
+                      "settings": {"udp": True, "auth": "noauth"}},
+                     {"tag": "probe", "listen": "127.0.0.1", "port": PROBE_SOCKS_PORT, "protocol": "socks",
+                      "settings": {"auth": "noauth"}}],
         "outbounds": [{"protocol": "vless", "tag": "proxy",
                        "settings": {"vnext": [{"address": server_ip or s["host"], "port": int(s["port"]),
                                                "users": [user]}]},
-                       "streamSettings": stream}],
+                       "streamSettings": stream},
+                      # leaves through the TUN, where sing-box sends Xray's traffic out directly
+                      {"protocol": "freedom", "tag": "direct"}],
+        "routing": {"rules": [
+            {"type": "field", "inboundTag": ["probe"], "outboundTag": "proxy"},
+            *([{"type": "field", "inboundTag": ["socks"], "outboundTag": "direct"}] if bypass else []),
+        ]},
     }
 
 
@@ -190,7 +205,9 @@ def build_config(server, direct_hosts, local_dns=None):
     # on macOS the system resolver points at the tunnel while it is up, so "local"
     # must be the network's own DNS server, asked directly
     local = {"type": "udp", "tag": "local", "server": local_dns} if local_dns else {"type": "local", "tag": "local"}
-    direct_rules = [{"process_name": ["xray"], "outbound": "direct"}] if IS_MAC else []
+    # Xray's own connections — to the server, and its direct traffic while bypassing —
+    # never loop back into the tunnel
+    direct_rules = [{"process_name": ["xray"], "outbound": "direct"}]
     return {
         "log": {"level": "warn", "output": str(SB_LOG), "timestamp": True},
         "dns": {
@@ -223,7 +240,7 @@ def build_config(server, direct_hosts, local_dns=None):
             "rules": [
                 {"action": "sniff"},
                 {"protocol": "dns", "action": "hijack-dns"},
-                *direct_rules,   # Xray's own link to the server never loops back into the tunnel
+                *direct_rules,
                 {"ip_is_private": True, "outbound": "direct"},
                 {"domain_suffix": RU_SUFFIXES, "outbound": "direct"},
                 {"rule_set": ["geosite-ru", "geoip-ru"], "outbound": "direct"},
@@ -280,23 +297,54 @@ def tcp_latency(host, port, timeout=3.0):
         return None
 
 
-def socks_probe(host, port, timeout=6.0):
-    """Open host:port through Xray's SOCKS5; returns milliseconds or None."""
+def recv_exact(c, n):
+    b = b""
+    while len(b) < n:
+        chunk = c.recv(n - len(b))
+        if not chunk:
+            raise OSError("closed")
+        b += chunk
+    return b
+
+
+def server_probe(timeout=4.0):
+    """Fetch http://PROBE_HOST/generate_204 through Xray's probe port (always the
+    server); returns milliseconds or None. A real request: Xray answers the SOCKS
+    CONNECT before it has reached the server."""
     t = time.monotonic()
     try:
-        with socket.create_connection(("127.0.0.1", SOCKS_PORT), timeout=timeout) as c:
+        with socket.create_connection(("127.0.0.1", PROBE_SOCKS_PORT), timeout=timeout) as c:
             c.settimeout(timeout)
             c.sendall(b"\x05\x01\x00")
-            if c.recv(2) != b"\x05\x00":
+            if recv_exact(c, 2) != b"\x05\x00":
                 return None
-            h = host.encode()
-            c.sendall(b"\x05\x01\x00\x03" + bytes([len(h)]) + h + int(port).to_bytes(2, "big"))
-            reply = c.recv(10)
-            if len(reply) < 2 or reply[1] != 0:
+            h = PROBE_HOST.encode()
+            c.sendall(b"\x05\x01\x00\x03" + bytes([len(h)]) + h + (80).to_bytes(2, "big"))
+            head = recv_exact(c, 4)
+            if head[1] != 0:
+                return None
+            recv_exact(c, {1: 4, 4: 16}.get(head[3], 0) + 2 if head[3] != 3 else recv_exact(c, 1)[0] + 2)
+            c.sendall(f"GET /generate_204 HTTP/1.1\r\nHost: {PROBE_HOST}\r\nConnection: close\r\n\r\n".encode())
+            if not recv_exact(c, 12).startswith(b"HTTP/"):
                 return None
             return int((time.monotonic() - t) * 1000)
     except OSError:
         return None
+
+
+def network_signature():
+    """Default gateway and interface of the physical network: when it changes
+    (Wi-Fi <-> Ethernet, another network, tethering) Xray's links hang on the old one."""
+    try:
+        if IS_MAC:
+            out = subprocess.run(["route", "-n", "get", "default"], capture_output=True, text=True, timeout=3).stdout
+            return " ".join(l.split(":", 1)[1].strip() for l in out.splitlines()
+                            if l.strip().startswith(("gateway:", "interface:")))
+        out = subprocess.run(["ip", "-4", "route", "show", "default", "table", "main"],
+                             capture_output=True, text=True, timeout=3).stdout
+        return out.split("\n")[0].strip()
+    except (OSError, subprocess.SubprocessError):
+        return ""
 
 
 def mac_system_dns():
@@ -490,12 +538,15 @@ class Tray:
         self.probe_ms = None
         self.probing = False
         self.fails = 0
+        self.bypass = False               # server unreachable: Xray sends traffic direct
+        self.net = network_signature()
         self.last_bytes = None
         self.last_tick = time.time()      # wall clock: a jump means the machine slept
         self.last_reconnect = 0.0
         self.reconnect_gap = 30           # seconds between automatic reconnects, doubles up to 5 min
         self.rates = (0.0, 0.0)
         self.settings = load(SETTINGS, {"subscriptions": [], "selected": None, "autoconnect": True})
+        self.settings.setdefault("fallback_direct", True)
         self.servers = load(SERVERS, [])
         self.proc = None
         self.xray = None
@@ -537,6 +588,8 @@ class Tray:
         lines = [f"Glass VPN — {STATE_TEXT[self.state]}"]
         if cur and self.state != OFF:
             lines.append(f"Сервер: {cur['name']}")
+        if self.state == BYPASS:
+            lines.append("Трафик идёт мимо VPN, пока сервер не ответит")
         if self.state == ON:
             if self.probe_ms:
                 lines.append(f"Задержка: {self.probe_ms} мс")
@@ -559,14 +612,19 @@ class Tray:
         if fg != self.fg:
             self.fg = fg
             self.refresh_icon()
+        net = network_signature()
+        if net != self.net:
+            self.net = net
+            if self.want_up and net and self.is_up():
+                # another network: restart Xray onto it and check at once
+                self.restart_xray()
         b = tun_bytes()
         if b and self.last_bytes:
             self.rates = ((b[0] - self.last_bytes[0]) / 2.0, (b[1] - self.last_bytes[1]) / 2.0)
         self.last_bytes = b
         if self.want_up and self.is_up() and not self.probing:
             self.probing = True
-            threading.Thread(target=lambda: self.sig.probed.emit(socks_probe(PROBE_HOST, PROBE_PORT)),
-                             daemon=True).start()
+            threading.Thread(target=lambda: self.sig.probed.emit(server_probe()), daemon=True).start()
         elif not self.want_up:
             self.set_state(OFF)
         if self.state == ON:
@@ -579,17 +637,46 @@ class Tray:
         if ms is not None:
             self.fails, self.probe_ms = 0, ms
             self.reconnect_gap = 30
+            if self.bypass:
+                self.set_bypass(False)
             self.set_state(ON)
         else:
             self.fails += 1
-            # give a fresh connection a few seconds before calling it broken
+            # give a fresh connection a few seconds before calling it broken; then let
+            # traffic go direct until the server answers again (the probe port still asks it)
             if self.fails >= 3:
-                self.set_state(ERROR)
+                if self.settings.get("fallback_direct", True):
+                    self.set_bypass(True)
+                    self.set_state(BYPASS)
+                else:
+                    self.set_state(ERROR)
             # still broken: the network may have changed under the cores — restart them,
             # backing off while there is no network at all
-            if self.fails >= 6 and time.time() - self.last_reconnect >= self.reconnect_gap:
+            # (not while bypassing: that would put traffic back on the dead tunnel every time)
+            if self.fails >= 6 and not self.bypass and time.time() - self.last_reconnect >= self.reconnect_gap:
                 self.reconnect_gap = min(self.reconnect_gap * 2, 300)
                 self.reconnect()
+
+    def set_bypass(self, on):
+        if on != self.bypass:
+            self.bypass = on
+            self.restart_xray()
+
+    def restart_xray(self):
+        """New Xray (fresh links, current mode) under the running TUN."""
+        s = self.current()
+        if not s or not self.want_up:
+            return
+        ips = resolve(s["host"])
+        save(XRAY_CONFIG, xray_config(s, ips[0] if ips else None, self.bypass))
+        if self.xray and self.xray.poll() is None:
+            self.xray.send_signal(signal.SIGTERM)
+            try:
+                self.xray.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                self.xray.kill()
+        self.xray = subprocess.Popen([XRAY, "run", "-c", str(XRAY_CONFIG)],
+                                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     def reconnect(self):
         if self.want_up:
@@ -609,7 +696,7 @@ class Tray:
         m.clear()
         up = self.is_up()
         cur = self.current()
-        mark = {OFF: "○", CONNECTING: "◌", ON: "●", ERROR: "⚠"}[self.state]
+        mark = {OFF: "○", CONNECTING: "◌", ON: "●", BYPASS: "◐", ERROR: "⚠"}[self.state]
         status = QAction(f"{mark} {STATE_TEXT[self.state].capitalize()}" + (f": {cur['name']}" if cur and self.state != OFF else "")
                          + (f" · {self.probe_ms} мс" if self.state == ON and self.probe_ms else ""), m)
         status.setEnabled(False)
@@ -636,6 +723,10 @@ class Tray:
 
         m.addSeparator()
         self.build_sources_menu(m.addMenu("Подписки и ключи"))
+        fd = m.addAction("Напрямую, если сервер недоступен")
+        fd.setCheckable(True)
+        fd.setChecked(self.settings.get("fallback_direct", True))
+        fd.toggled.connect(self.set_fallback_direct)
         ac = m.addAction("Подключаться при входе")
         ac.setCheckable(True)
         ac.setChecked(AUTOSTART.exists() and self.settings.get("autoconnect", True))
@@ -800,9 +891,11 @@ class Tray:
         CACHE_DIR.mkdir(parents=True, exist_ok=True)
         if IS_MAC:   # stop first: the old tunnel's DNS override would hide the real resolver
             self.stop_process()
+        if not self.want_up:
+            self.bypass = False      # a fresh start tries the server first
         server_ips = resolve(s["host"])
         direct = pptp_gateways() + server_ips
-        save(XRAY_CONFIG, xray_config(s, server_ips[0] if server_ips else None))
+        save(XRAY_CONFIG, xray_config(s, server_ips[0] if server_ips else None, self.bypass))
         save(SB_CONFIG, build_config(s, direct, mac_system_dns() if IS_MAC else None))
         for cmd in ([XRAY, "run", "-test", "-c", str(XRAY_CONFIG)], [SING_BOX, "check", "-c", str(SB_CONFIG)]):
             check = subprocess.run(cmd, capture_output=True, text=True)
@@ -854,6 +947,13 @@ class Tray:
         if self.want_up and not self.is_up():
             self.notify("Glass VPN", "Соединение прервалось, переподключаюсь…")
             self.connect()
+
+    def set_fallback_direct(self, on):
+        self.settings["fallback_direct"] = on
+        save(SETTINGS, self.settings)
+        if not on and self.bypass:
+            self.set_bypass(False)
+            self.set_state(ERROR)
 
     def set_autostart(self, on):
         self.settings["autoconnect"] = on

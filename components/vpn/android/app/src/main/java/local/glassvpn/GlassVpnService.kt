@@ -11,6 +11,7 @@ import android.net.ConnectivityManager
 import android.net.LinkProperties
 import android.net.Network
 import android.net.NetworkCapabilities
+import android.net.NetworkRequest
 import android.net.VpnService
 import android.os.Build
 import android.os.ParcelFileDescriptor
@@ -31,7 +32,7 @@ import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
 
-enum class VpnState { OFF, CONNECTING, ON, ERROR }
+enum class VpnState { OFF, CONNECTING, ON, BYPASS, ERROR }
 
 data class VpnStatus(
     val state: VpnState = VpnState.OFF,
@@ -44,7 +45,8 @@ data class VpnStatus(
 )
 
 val STATE_TEXT = mapOf(VpnState.OFF to "отключено", VpnState.CONNECTING to "подключение…",
-                       VpnState.ON to "подключено", VpnState.ERROR to "сервер не отвечает")
+                       VpnState.ON to "подключено", VpnState.BYPASS to "напрямую — сервер недоступен",
+                       VpnState.ERROR to "сервер не отвечает")
 
 fun humanRate(bps: Long): String = when {
     bps >= 1 shl 20 -> "%.1f МБ/с".format(bps / 1048576.0)
@@ -97,22 +99,31 @@ class GlassVpnService : VpnService() {
     private var errorSince = 0L                    // nanoTime when the server stopped answering
     private var restartDelay = WATCHDOG_MIN
     private var tick = 0
+    @Volatile private var bypass = false           // server unreachable: traffic goes direct
+    @Volatile private var probeNow = false
+    @Volatile private var restarting = false       // Xray is down on purpose for a moment
+    private var lastNetwork: Network? = null
+    private var netRestart: ScheduledFuture<*>? = null
 
     private val cm by lazy { getSystemService(ConnectivityManager::class.java) }
+    // Every physical network, not "the default network": for this app the default is its own
+    // VPN, which stays put while Wi-Fi and mobile come and go underneath — so switches went
+    // unnoticed and Xray kept its links to the network that was gone.
     private val netCallback = object : ConnectivityManager.NetworkCallback() {
-        override fun onAvailable(network: Network) { onNetwork(network) }
-        override fun onLinkPropertiesChanged(network: Network, lp: LinkProperties) { onNetwork(network) }
-        override fun onLost(network: Network) {
-            if (network == underlying) { underlying = null; setUnderlyingNetworks(null) }
-        }
+        override fun onAvailable(network: Network) = onNetworksChanged()
+        override fun onCapabilitiesChanged(network: Network, caps: NetworkCapabilities) = onNetworksChanged()
+        override fun onLinkPropertiesChanged(network: Network, lp: LinkProperties) = onNetworksChanged()
+        override fun onLost(network: Network) = onNetworksChanged()
     }
 
     override fun onCreate() {
         super.onCreate()
         getSystemService(NotificationManager::class.java).createNotificationChannel(
             NotificationChannel(CHANNEL, "VPN", NotificationManager.IMPORTANCE_LOW).apply { setShowBadge(false) })
-        // the app is outside its own VPN, so this follows the physical network
-        cm.registerDefaultNetworkCallback(netCallback)
+        cm.registerNetworkCallback(NetworkRequest.Builder()
+            .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+            .addCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)
+            .build(), netCallback)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -161,10 +172,14 @@ class GlassVpnService : VpnService() {
         val s = store.current() ?: return fail("Нет серверов: добавьте подписку")
         server = s
         publish(VpnStatus(VpnState.CONNECTING, s.name))
-        serverIp = resolveIpv4(s.host) ?: return fail("Не удалось найти адрес сервера ${s.host}")
-        val creds = Socks(freePort(), randomToken(), randomToken())
+        serverIp = resolveIpv4(s.host)
+        // can't even resolve the server (e.g. mobile internet on a whitelist): start bypassing it
+        bypass = serverIp == null
+        if (bypass && !store.fallbackDirect) return fail("Не удалось найти адрес сервера ${s.host}")
+        val creds = Socks(freePort(), randomToken(), randomToken(), freePort())
         socks = creds
-        if (underlying == null) underlying = physical(cm.activeNetwork)   // before the callback's first event
+        underlying = bestPhysical()
+        lastNetwork = underlying
         localDns = dnsOf(underlying)
         try {
             if (!coreEnvReady) {
@@ -173,7 +188,7 @@ class GlassVpnService : VpnService() {
                 coreEnvReady = true
             }
             core = Libv2ray.newCoreController(CoreCallbacks()).also {
-                it.startLoop(xrayConfig(s, serverIp, creds, localDns), 0)
+                it.startLoop(xrayConfig(s, serverIp, creds, localDns, bypass), 0)
             }
         } catch (e: Exception) {
             Log.e(TAG, "xray", e)
@@ -209,6 +224,7 @@ class GlassVpnService : VpnService() {
 
         running = true
         failures = 0
+        tick = 0
         errorSince = 0L
         restartDelay = WATCHDOG_MIN
         lastStats = null
@@ -244,21 +260,41 @@ class GlassVpnService : VpnService() {
         // keep the notification so the error is visible; the user can retry or disconnect
     }
 
-    /** New physical network: follow it, and restart Xray if the local DNS changed. */
-    private fun onNetwork(reported: Network) {
-        // the default-network callback reports our own VPN too: look past it
-        val network = physical(reported) ?: return
+    /**
+     * New physical network (Wi-Fi <-> mobile, a new address): Xray's links to the server are
+     * bound to the old one and hang, so restart it — once things settle — and check at once.
+     */
+    private fun onNetworksChanged() {
+        val network = bestPhysical()
         underlying = network
         if (!running) return
+        if (network == null) {          // no network at all: nothing to restart onto yet
+            setUnderlyingNetworks(null)
+            return
+        }
         setUnderlyingNetworks(arrayOf(network))
-        worker.execute {
-            val dns = dnsOf(network)
-            if (running && dns != localDns) {
-                Log.i(TAG, "network DNS $localDns -> $dns, restarting Xray")
+        val dns = dnsOf(network)
+        if (network == lastNetwork && dns == localDns) return
+        netRestart?.cancel(false)
+        netRestart = timer.schedule({
+            worker.execute {
+                if (!running) return@execute
+                Log.i(TAG, "network changed ($localDns -> $dns), restarting Xray")
+                lastNetwork = network
                 localDns = dns
                 restartCore()
+                failures = 0
+                probeNow = true
             }
-        }
+        }, 1500, TimeUnit.MILLISECONDS)
+    }
+
+    /** Switch between "through the server" and "direct while the server is unreachable". */
+    private fun setBypass(on: Boolean) {
+        if (bypass == on) return
+        Log.i(TAG, if (on) "server unreachable: traffic goes direct" else "server is back: traffic goes through it")
+        bypass = on
+        restartCore()
     }
 
     /** Restart Xray inside the running tunnel (TUN and hev stay up; the server is re-resolved). */
@@ -266,11 +302,14 @@ class GlassVpnService : VpnService() {
         val s = server ?: return
         val creds = socks ?: return
         resolveIpv4(s.host)?.let { serverIp = it }
+        restarting = true
         try {
             core?.stopLoop()
-            core?.startLoop(xrayConfig(s, serverIp, creds, localDns), 0)
+            core?.startLoop(xrayConfig(s, serverIp, creds, localDns, bypass), 0)
         } catch (e: Exception) {
             Log.e(TAG, "xray restart", e)
+        } finally {
+            restarting = false
         }
     }
 
@@ -298,25 +337,36 @@ class GlassVpnService : VpnService() {
         // (every tick while connecting or failing, so a dead server shows up quickly)
         // (every tick while connecting or failing so a dead server shows up quickly; every 30 s
         // when failing with the screen off)
+        // while bypassing: every 10 s with the screen on, 30 s off (mobile whitelists can last hours)
         val n = tick++
-        val failing = cur.state != VpnState.ON || failures > 0
-        if ((n % 2 == 0 && interactive) || (failing && (interactive || n % 15 == 0))) {
-            val ms = socks?.let { socksProbe(it) }
+        val due = when {
+            probeNow -> true
+            bypass -> n % (if (interactive) 5 else 15) == 0
+            cur.state != VpnState.ON || failures > 0 -> interactive || n % 15 == 0
+            else -> n % 2 == 0 && interactive
+        }
+        if (due) {
+            probeNow = false
+            // the probe port always goes to the server, so this is the server's health
+            val ms = socks?.let { socksProbe(it.probe, timeoutMs = 4000) }
             if (!running) return
             if (ms != null) {
                 failures = 0
                 errorSince = 0L
                 restartDelay = WATCHDOG_MIN
+                if (bypass) worker.execute { if (running) setBypass(false) }
                 next = next.copy(state = VpnState.ON, latency = ms, message = null,
                                  since = cur.since.takeIf { it != 0L } ?: System.currentTimeMillis())
-            } else if (++failures >= 3) {
-                next = next.copy(state = VpnState.ERROR, latency = null)
+            } else if (++failures >= 3 || bypass) {
+                val direct = Store(this).fallbackDirect
+                if (direct && !bypass) worker.execute { if (running) setBypass(true) }
+                next = next.copy(state = if (direct) VpnState.BYPASS else VpnState.ERROR, latency = null)
                 if (errorSince == 0L) errorSince = now
             }
         }
         publish(next)
         // watchdog: Xray died, or the server has been silent too long -> restart it, backing off
-        val coreDead = core?.isRunning == false
+        val coreDead = !restarting && core?.isRunning == false
         if (coreDead || (errorSince != 0L && now - errorSince > restartDelay)) {
             Log.w(TAG, if (coreDead) "watchdog: Xray stopped" else "watchdog: no answer for ${restartDelay / 1_000_000_000} s")
             errorSince = if (errorSince != 0L) now else 0L
@@ -340,6 +390,7 @@ class GlassVpnService : VpnService() {
         val text = when (st.state) {
             VpnState.ON -> "↓ ${humanRate(st.down)}  ↑ ${humanRate(st.up)}" + (st.latency?.let { "  ·  $it мс" } ?: "")
             VpnState.ERROR -> st.message ?: STATE_TEXT[st.state]
+            VpnState.BYPASS -> "Сервер недоступен — трафик идёт напрямую, жду сервер"
             else -> STATE_TEXT[st.state]
         }
         return Notification.Builder(this, CHANNEL)
@@ -361,15 +412,18 @@ class GlassVpnService : VpnService() {
 
     // --------------------------------------------------------------- helpers --
 
-    private fun isPhysical(n: Network) = cm.getNetworkCapabilities(n)?.let {
-        it.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN) &&
-            it.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
-    } == true
-
-    /** [n] if it is a physical network, else any physical network with internet. */
+    /** The physical network the system would use: working first, then Wi-Fi/Ethernet over mobile. */
     @Suppress("DEPRECATION")
-    private fun physical(n: Network?): Network? =
-        n?.takeIf { isPhysical(it) } ?: cm.allNetworks.firstOrNull { isPhysical(it) }
+    private fun bestPhysical(): Network? = cm.allNetworks.mapNotNull { n ->
+        cm.getNetworkCapabilities(n)?.takeIf {
+            it.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN) &&
+                it.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+        }?.let { n to it }
+    }.maxByOrNull { (_, c) ->
+        (if (c.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)) 2 else 0) +
+            (if (c.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) ||
+                 c.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)) 1 else 0)
+    }?.first
 
     private fun dnsOf(network: Network?): List<String> {
         val lp = network?.let { cm.getLinkProperties(it) }
@@ -416,6 +470,7 @@ class GlassVpnService : VpnService() {
 fun stateColor(s: VpnState): Long = when (s) {
     VpnState.CONNECTING -> 0xFFF5B83D
     VpnState.ON -> 0xFF34C759
+    VpnState.BYPASS -> 0xFFFF9F0A
     VpnState.ERROR -> 0xFFFF453A
     VpnState.OFF -> 0xFF8E8E93
 }

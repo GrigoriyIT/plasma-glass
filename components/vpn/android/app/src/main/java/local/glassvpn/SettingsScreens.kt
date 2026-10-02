@@ -21,6 +21,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
@@ -55,7 +56,7 @@ internal fun TitleBar(title: String, onBack: () -> Unit, actions: @Composable Ro
 private fun SettingRow(title: String, detail: String, checked: Boolean? = null, action: String? = null,
                        onClick: () -> Unit) {
     val dim = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
-    Row(Modifier.fillMaxWidth().focusRing(onClick = onClick).padding(horizontal = 12.dp, vertical = 10.dp),
+    Row(Modifier.fillMaxWidth().focusRing(zoom = 1f, onClick = onClick).padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text(title, fontSize = 15.sp)
@@ -76,6 +77,7 @@ internal fun SettingsScreen(dark: Boolean, store: Store, onBack: () -> Unit, onA
     val ctx = LocalContext.current
     var autoConnect by remember { mutableStateOf(store.autoConnect) }
     var bootStart by remember { mutableStateOf(store.bootStart) }
+    var fallbackDirect by remember { mutableStateOf(store.fallbackDirect) }
     // re-read when the screen comes back from a system dialog
     var resumed by remember { mutableIntStateOf(0) }
     val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current
@@ -104,6 +106,11 @@ internal fun SettingsScreen(dark: Boolean, store: Store, onBack: () -> Unit, onA
                     SettingRow("Запускать при включении устройства", "VPN подключается после загрузки",
                                checked = bootStart) {
                         bootStart = !bootStart; store.bootStart = bootStart
+                    }
+                    SettingRow("Если сервер недоступен — напрямую",
+                               "Например, мобильный интернет по белому списку: сайты из списка работают, " +
+                               "а VPN включится сам, как только сервер ответит", checked = fallbackDirect) {
+                        fallbackDirect = !fallbackDirect; store.fallbackDirect = fallbackDirect
                     }
                 }
             }
@@ -164,6 +171,15 @@ internal fun AppsScreen(dark: Boolean, store: Store, onBack: (changed: Boolean) 
     val leave = { onBack(excluded != initial) }
     BackHandler(onBack = leave)
     val dim = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+    val toggle = { pkg: String ->
+        excluded = if (pkg in excluded) excluded - pkg else excluded + pkg
+        store.excluded = excluded
+    }
+    if (isTv(ctx)) {
+        TvApps(dark, apps, initial, excluded, toggle, onReset = { excluded = emptySet(); store.excluded = excluded },
+               onBack = leave)
+        return
+    }
 
     Backdrop(dark) {
         Column(Modifier.fillMaxSize().systemBarsPadding().padding(horizontal = 16.dp)) {
@@ -197,10 +213,7 @@ internal fun AppsScreen(dark: Boolean, store: Store, onBack: (changed: Boolean) 
                     LazyColumn {
                         items(shown, key = { it.pkg }) { app ->
                             val on = app.pkg in excluded
-                            Row(Modifier.fillMaxWidth().focusRing {
-                                    excluded = if (on) excluded - app.pkg else excluded + app.pkg
-                                    store.excluded = excluded
-                                }.padding(horizontal = 10.dp, vertical = 8.dp),
+                            Row(Modifier.fillMaxWidth().focusRing(zoom = 1f) { toggle(app.pkg) }.padding(horizontal = 10.dp, vertical = 8.dp),
                                 verticalAlignment = Alignment.CenterVertically) {
                                 AppIcon(app.pkg)
                                 Spacer(Modifier.width(12.dp))
@@ -218,13 +231,106 @@ internal fun AppsScreen(dark: Boolean, store: Store, onBack: (changed: Boolean) 
     }
 }
 
+/**
+ * The TV version: a grid of big tiles instead of a long list — the remote moves in four
+ * directions, rows of a full-width list zoomed past the card's edges, and the search field
+ * grabbed focus (and the on-screen keyboard) first. Search opens only when asked for.
+ */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun AppIcon(pkg: String) {
+private fun TvApps(dark: Boolean, apps: List<AppEntry>?, initial: Set<String>, excluded: Set<String>,
+                   toggle: (String) -> Unit, onReset: () -> Unit, onBack: () -> Unit) {
+    var filter by remember { mutableIntStateOf(0) }       // 0 all, 1 selected, 2 system
+    var searching by remember { mutableStateOf(false) }
+    var query by remember { mutableStateOf("") }
+    val dim = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+    val firstTile = remember { androidx.compose.ui.focus.FocusRequester() }
+    val searchField = remember { androidx.compose.ui.focus.FocusRequester() }
+    Backdrop(dark) {
+        Column(Modifier.fillMaxSize().padding(horizontal = 48.dp, vertical = 24.dp)) {
+            TitleBar("В обход VPN" + if (excluded.isNotEmpty()) " · напрямую: ${excluded.size}" else "", onBack)
+            Text("Выбранные приложения работают полностью напрямую, мимо туннеля. OK — выбрать или снять.",
+                 fontSize = 14.sp, color = dim, modifier = Modifier.padding(start = 12.dp, bottom = 10.dp))
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier.padding(start = 4.dp, bottom = 12.dp)) {
+                PillButton("Все", dark, selected = filter == 0) { filter = 0 }
+                PillButton("Выбранные (${excluded.size})", dark, selected = filter == 1) { filter = 1 }
+                PillButton("Системные", dark, selected = filter == 2) { filter = 2 }
+                PillButton(if (query.isEmpty()) "Поиск…" else "Поиск: $query", dark, selected = query.isNotEmpty()) {
+                    searching = true
+                }
+                if (excluded.isNotEmpty()) PillButton("Сбросить всё", dark, onClick = onReset)
+            }
+            if (searching) {
+                OutlinedTextField(query, { query = it }, singleLine = true, placeholder = { Text("Название приложения") },
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Done),
+                    keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = { searching = false }),
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp).focusRequester(searchField))
+                LaunchedEffect(Unit) { searchField.requestFocus() }
+            }
+            val list = apps
+            if (list == null) {
+                LinearProgressIndicator(Modifier.fillMaxWidth().padding(16.dp))
+                return@Column
+            }
+            val q = query.trim().lowercase()
+            val shown = list.filter {
+                when (filter) {
+                    1 -> it.pkg in excluded
+                    2 -> it.system
+                    else -> !it.system || it.pkg in excluded
+                } && (q.isEmpty() || q in it.label.lowercase() || q in it.pkg)
+            }.sortedWith(compareBy<AppEntry>({ it.pkg !in initial }, { it.label.lowercase() }))
+            if (shown.isEmpty()) {
+                Text(if (filter == 1) "Пока ничего не выбрано" else "Ничего не найдено", color = dim,
+                     modifier = Modifier.padding(12.dp))
+            }
+            InitialFocus(firstTile, enabled = !searching)
+            androidx.compose.foundation.lazy.grid.LazyVerticalGrid(
+                columns = androidx.compose.foundation.lazy.grid.GridCells.Adaptive(170.dp),
+                contentPadding = PaddingValues(8.dp),     // room for the focus zoom
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                items(shown.size, key = { shown[it].pkg }) { i ->
+                    val app = shown[i]
+                    AppTile(app, app.pkg in excluded, dark,
+                            if (i == 0) Modifier.focusRequester(firstTile) else Modifier) { toggle(app.pkg) }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AppTile(app: AppEntry, on: Boolean, dark: Boolean, modifier: Modifier, onClick: () -> Unit) {
+    val shape = RoundedCornerShape(18.dp)
+    Box(modifier.height(150.dp).focusRing(shape, onClick = onClick).background(when {
+            on -> Color(stateColor(VpnState.BYPASS)).copy(alpha = if (dark) 0.30f else 0.22f)
+            dark -> Color.White.copy(alpha = 0.07f)
+            else -> Color.White.copy(alpha = 0.55f)
+        })) {
+        Column(Modifier.fillMaxSize().padding(10.dp), horizontalAlignment = Alignment.CenterHorizontally,
+               verticalArrangement = Arrangement.Center) {
+            AppIcon(app.pkg, 56.dp)
+            Spacer(Modifier.height(8.dp))
+            Text(app.label, fontSize = 14.sp, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                 textAlign = androidx.compose.ui.text.style.TextAlign.Center, lineHeight = 16.sp)
+        }
+        if (on) Text("Напрямую", fontSize = 11.sp, color = Color.White, fontWeight = FontWeight.Medium,
+                     modifier = Modifier.align(Alignment.TopEnd).padding(6.dp)
+                         .background(Color(stateColor(VpnState.BYPASS)), RoundedCornerShape(50))
+                         .padding(horizontal = 8.dp, vertical = 2.dp))
+    }
+}
+
+@Composable
+private fun AppIcon(pkg: String, size: androidx.compose.ui.unit.Dp = 36.dp) {
     val ctx = LocalContext.current
     val icon by produceState<ImageBitmap?>(null, pkg) {
         value = withContext(Dispatchers.IO) {
             try { ctx.packageManager.getApplicationIcon(pkg).toBitmap(96, 96).asImageBitmap() } catch (e: Exception) { null }
         }
     }
-    Box(Modifier.size(36.dp)) { icon?.let { Image(it, null, Modifier.fillMaxSize()) } }
+    Box(Modifier.size(size)) { icon?.let { Image(it, null, Modifier.fillMaxSize()) } }
 }

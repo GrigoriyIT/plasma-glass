@@ -124,7 +124,10 @@ val RU_SUFFIXES = listOf("ru", "su", "xn--p1ai", "xn--p1acf", "xn--d1acj3b")  //
 val EXCLUDED_NETS = listOf("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16",
                            "100.64.0.0/10", "224.0.0.0/3")
 
-data class Socks(val port: Int, val user: String, val pass: String)
+/** Local SOCKS5 for hev, and a second port that always goes to the server (the live check). */
+data class Socks(val port: Int, val user: String, val pass: String, val probePort: Int = 0) {
+    val probe get() = copy(port = probePort)
+}
 
 private fun obj(vararg pairs: Pair<String, Any?>) = JSONObject().apply {
     for ((k, v) in pairs) if (v != null) put(k, v)
@@ -163,28 +166,39 @@ fun streamSettings(s: Server): JSONObject {
  * [serverIp] is resolved by the app beforehand, [localDns] is the physical network's
  * resolver: Go has no system resolver on Android.
  */
-fun xrayConfig(s: Server, serverIp: String?, socks: Socks, localDns: List<String>): String {
+fun xrayConfig(s: Server, serverIp: String?, socks: Socks, localDns: List<String>, bypass: Boolean = false): String {
     val user = obj("id" to s.uuid, "encryption" to s.encryption.ifEmpty { "none" },
                    "flow" to s.flow.takeIf { it.isNotEmpty() })
     val ruDomains = RU_SUFFIXES.map { "domain:$it" } + "geosite:category-ru"
-    val dnsServers = JSONArray().put("https://1.1.1.1/dns-query")   // through the proxy
+    val dnsServers = JSONArray()
     for (ip in localDns) dnsServers.put(obj("address" to ip, "port" to 53,
                                             "domains" to arr(ruDomains), "skipFallback" to true))
+    dnsServers.put("https://1.1.1.1/dns-query")   // through the proxy
+    // when DoH can't get through (server down, mobile whitelist) the network's own DNS answers
+    for (ip in localDns) dnsServers.put(obj("address" to ip, "port" to 53))
     val rules = JSONArray()
+        // the live check always goes to the server, even while traffic bypasses it
+        .put(obj("type" to "field", "inboundTag" to arr("probe"), "outboundTag" to "proxy"))
         // probes of our own TUN addresses (e.g. Private DNS on 198.18.0.2:853) fail fast
         .put(obj("type" to "field", "ip" to arr("198.18.0.0/15"), "outboundTag" to "block"))
     if (localDns.isNotEmpty()) rules.put(obj("type" to "field", "ip" to arr(localDns), "outboundTag" to "direct"))
     rules.put(obj("type" to "field", "domain" to arr(ruDomains), "outboundTag" to "direct"))
         .put(obj("type" to "field", "ip" to arr("geoip:private", "geoip:ru"), "outboundTag" to "direct"))
+    // server unreachable: everything else goes direct too instead of into a dead tunnel
+    if (bypass) rules.put(obj("type" to "field", "inboundTag" to arr("socks", "dns"), "outboundTag" to "direct"))
+    val account = arr(obj("user" to socks.user, "pass" to socks.pass))
+    val inbounds = arr(obj(
+        "tag" to "socks", "listen" to "127.0.0.1", "port" to socks.port, "protocol" to "socks",
+        "settings" to obj("auth" to "password", "udp" to true, "accounts" to account),
+        "sniffing" to obj("enabled" to true, "destOverride" to arr("http", "tls", "quic"), "routeOnly" to true),
+    ))
+    if (socks.probePort != 0) inbounds.put(obj(
+        "tag" to "probe", "listen" to "127.0.0.1", "port" to socks.probePort, "protocol" to "socks",
+        "settings" to obj("auth" to "password", "accounts" to account)))
     return obj(
         "log" to obj("loglevel" to "warning", "access" to "none"),
-        "dns" to obj("servers" to dnsServers, "queryStrategy" to "UseIPv4"),
-        "inbounds" to arr(obj(
-            "tag" to "socks", "listen" to "127.0.0.1", "port" to socks.port, "protocol" to "socks",
-            "settings" to obj("auth" to "password", "udp" to true,
-                              "accounts" to arr(obj("user" to socks.user, "pass" to socks.pass))),
-            "sniffing" to obj("enabled" to true, "destOverride" to arr("http", "tls", "quic"), "routeOnly" to true),
-        )),
+        "dns" to obj("servers" to dnsServers, "queryStrategy" to "UseIPv4", "tag" to "dns"),
+        "inbounds" to inbounds,
         "outbounds" to arr(
             obj("protocol" to "vless", "tag" to "proxy",
                 "settings" to obj("vnext" to arr(obj("address" to (serverIp ?: s.host), "port" to s.port,

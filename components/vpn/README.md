@@ -17,6 +17,13 @@ A small tray client for VLESS subscriptions: [Xray-core](https://github.com/XTLS
 
   ![Icon states on a light and a dark bar](../../docs/images/glassvpn-states.png)
 
+- When the server stops answering (e.g. mobile internet on a whitelist), traffic goes direct
+  instead of into a dead tunnel: after three failed checks Xray is restarted with "everything
+  direct" (orange dot, "напрямую — сервер недоступен"), while a second SOCKS port that always
+  leads to the server keeps checking it; once it answers, traffic goes back through the VPN.
+  Menu: «Напрямую, если сервер недоступен» (on by default). On a new network (another default
+  gateway or interface) Xray is restarted at once — its links to the old one would hang.
+
 Files: settings and servers in `~/.config/glassvpn/` (mode 600), sing-box config and log
 in `~/.local/state/glassvpn/`.
 
@@ -68,6 +75,11 @@ Xray in-process ([AndroidLibXrayLite](https://github.com/2dust/AndroidLibXrayLit
 - The local SOCKS5 port is random and password-protected for each connection: some apps look for
   open local proxies to detect a VPN.
 - IPv4 only: no IPv6 route is added, so Android blocks IPv6 for tunnelled apps rather than leaking it.
+- Network switches (Wi-Fi <-> mobile) restart Xray at once. The app watches the physical networks
+  itself: for an app the "default network" is its own VPN, which never changes underneath.
+- Server unreachable (e.g. mobile internet on a whitelist): after three failed checks traffic goes
+  direct (orange, "напрямую — сервер недоступен") while a probe port that always leads to the server
+  keeps checking; when it answers, traffic goes back through the VPN. Setting, on by default.
 - Shield button with the same status colours as the tray icon; the live check fetches
   `generate_204` through Xray every 4 s while the screen is on. Speed and latency in the notification.
 - Quick Settings tile; "Always-on VPN" and "Block connections without VPN" in the system settings work.
