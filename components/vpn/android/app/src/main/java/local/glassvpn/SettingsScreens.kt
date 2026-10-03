@@ -35,12 +35,6 @@ import androidx.core.graphics.drawable.toBitmap
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-@Composable
-internal fun Backdrop(dark: Boolean, content: @Composable BoxScope.() -> Unit) {
-    val bg = if (dark) listOf(Color(0xFF0E1726), Color(0xFF1B1530), Color(0xFF0B1F24))
-             else listOf(Color(0xFFDDE8FF), Color(0xFFF3E6FF), Color(0xFFDDF6F0))
-    Box(Modifier.fillMaxSize().background(Brush.linearGradient(bg)), content = content)
-}
 
 @Composable
 internal fun TitleBar(title: String, onBack: () -> Unit, actions: @Composable RowScope.() -> Unit = {}) {

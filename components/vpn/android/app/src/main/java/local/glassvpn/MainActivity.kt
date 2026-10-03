@@ -31,6 +31,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.*
@@ -84,7 +88,9 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
+        // light status/navigation bar icons on the dark glass
+        enableEdgeToEdge(androidx.activity.SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
+                         androidx.activity.SystemBarStyle.dark(android.graphics.Color.TRANSPARENT))
         store = Store(this)
         reload()
         if (android.os.Build.VERSION.SDK_INT >= 33) notifyPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
@@ -93,8 +99,10 @@ class MainActivity : ComponentActivity() {
         if (savedInstanceState == null && intent?.action == Intent.ACTION_MAIN && store.autoConnect &&
             store.servers.isNotEmpty() && GlassVpnService.status.value.state == VpnState.OFF) connect()
         setContent {
-            val dark = isSystemInDarkTheme()
-            MaterialTheme(colorScheme = if (dark) darkColorScheme() else lightColorScheme()) {
+            val dark = true   // the glass look is dark by design
+            MaterialTheme(colorScheme = GlassColors.Colors) {
+              // text and icons outside a Material Surface default to black: make them glass-white
+              CompositionLocalProvider(LocalContentColor provides GlassColors.Text) {
                 val st by GlassVpnService.status.collectAsStateWithLifecycle()
                 when (page) {
                     Page.MAIN -> if (tv) TvScreen(st, dark) else Screen(st, dark)
@@ -107,6 +115,7 @@ class MainActivity : ComponentActivity() {
                         if (changed && GlassVpnService.status.value.state != VpnState.OFF) GlassVpnService.start(this)
                     }
                 }
+              }
             }
         }
     }
@@ -171,7 +180,9 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun toggle(state: VpnState) {
-        if (state == VpnState.OFF) connect() else GlassVpnService.start(this, GlassVpnService.ACTION_DISCONNECT)
+        // an ERROR with a message means the service gave up (no servers, no permission…): try again
+        val stopped = state == VpnState.OFF || (state == VpnState.ERROR && GlassVpnService.status.value.message != null)
+        if (stopped) connect() else GlassVpnService.start(this, GlassVpnService.ACTION_DISCONNECT)
     }
 
     private fun select(name: String) {
@@ -213,18 +224,16 @@ class MainActivity : ComponentActivity() {
     private fun Screen(st: VpnStatus, dark: Boolean) {
         var adding by remember { mutableStateOf(false) }
         var menu by remember { mutableStateOf(false) }
-        val bg = if (dark) listOf(Color(0xFF0E1726), Color(0xFF1B1530), Color(0xFF0B1F24))
-                 else listOf(Color(0xFFDDE8FF), Color(0xFFF3E6FF), Color(0xFFDDF6F0))
-        Box(Modifier.fillMaxSize().background(Brush.linearGradient(bg))) {
-            Column(Modifier.fillMaxSize().systemBarsPadding().padding(horizontal = 16.dp)) {
-                Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text("Glass VPN", fontSize = 22.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-                    IconButton(onClick = { adding = true }) { Icon(Icons.Filled.Add, "Добавить") }
-                    IconButton(onClick = { background { store.updateSubscriptions() } }, enabled = !busy) {
-                        Icon(Icons.Filled.Refresh, "Обновить подписки")
-                    }
+        Backdrop {
+            Column(Modifier.fillMaxSize().systemBarsPadding().padding(horizontal = 18.dp)) {
+                Row(Modifier.fillMaxWidth().padding(top = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Wordmark(24.sp, Modifier.weight(1f))
+                    RoundGlassButton(Icons.Filled.Add, "Добавить") { adding = true }
+                    Spacer(Modifier.width(8.dp))
+                    RoundGlassButton(Icons.Filled.Refresh, "Обновить подписки") { background { store.updateSubscriptions() } }
+                    Spacer(Modifier.width(8.dp))
                     Box {
-                        IconButton(onClick = { menu = true }) { Icon(Icons.Filled.MoreVert, "Ещё") }
+                        RoundGlassButton(Icons.Filled.MoreVert, "Ещё") { menu = true }
                         DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                             DropdownMenuItem(text = { Text("Проверка сети и других VPN") },
                                              onClick = { menu = false; page = Page.CHECK })
@@ -240,34 +249,51 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                 }
-
-                Spacer(Modifier.height(24.dp))
-                ShieldButton(st.state, dark) { toggle(st.state) }
-                Spacer(Modifier.height(16.dp))
+                Spacer(Modifier.height(36.dp))
+                Box(Modifier.align(Alignment.CenterHorizontally)) { GlassOrb(st.state, Modifier, 190.dp) { toggle(st.state) } }
+                Spacer(Modifier.height(22.dp))
                 StatusBlock(st)
-
-                val problems = vpnApps.size + checks.count { it.isProblem }
-                if (problems > 0) {
-                    Spacer(Modifier.height(16.dp))
-                    Glass(dark, Modifier.align(Alignment.CenterHorizontally).focusRing(RoundedCornerShape(24.dp)) { page = Page.CHECK }) {
-                        Text("⚠  Найдено проблем: $problems — проверить", fontSize = 14.sp,
-                             modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp))
-                    }
-                }
-                Spacer(Modifier.height(24.dp))
-                if (busy) LinearProgressIndicator(Modifier.fillMaxWidth().padding(bottom = 8.dp))
-                Glass(dark, Modifier.fillMaxWidth().weight(1f).padding(bottom = 16.dp)) {
-                    if (servers.isEmpty()) {
-                        Text("Нет серверов.\nНажмите «+» и вставьте ссылку на подписку или ключи vless://",
-                             Modifier.padding(20.dp), color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
-                    }
-                    LazyColumn {
-                        items(servers, key = { it.name }) { s -> ServerRow(s, s.name == selected, latency, dark) }
-                    }
-                }
+                ProblemsChip()
+                Spacer(Modifier.height(20.dp))
+                if (busy) LinearProgressIndicator(Modifier.fillMaxWidth().padding(bottom = 8.dp), color = GlassColors.Accent)
+                ServerCard(Modifier.fillMaxWidth().weight(1f).padding(bottom = 16.dp),
+                           "Нажмите «+» и вставьте ссылку на подписку или ключи vless://")
             }
         }
         if (adding) AddDialog(onDismiss = { adding = false }) { adding = false; add(it) }
+    }
+
+    @Composable
+    private fun ColumnScope.ProblemsChip() {
+        val problems = vpnApps.size + checks.count { it.isProblem }
+        if (problems == 0) return
+        Spacer(Modifier.height(14.dp))
+        Row(Modifier.align(Alignment.CenterHorizontally).focusRing(RoundedCornerShape(50)) { page = Page.CHECK }
+                .glass(RoundedCornerShape(50), 0.9f).padding(horizontal = 16.dp, vertical = 9.dp),
+            verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Filled.Warning, null, Modifier.size(16.dp), tint = Color(stateColor(VpnState.CONNECTING)))
+            Spacer(Modifier.width(8.dp))
+            Text("Найдено проблем: $problems", fontSize = 14.sp, color = GlassColors.Text)
+        }
+    }
+
+    /** The server list on a glass card, with a small header. */
+    @Composable
+    private fun ServerCard(modifier: Modifier, emptyHint: String) {
+        Glass(modifier = modifier) {
+            Row(Modifier.fillMaxWidth().padding(start = 14.dp, end = 14.dp, top = 8.dp, bottom = 6.dp),
+                verticalAlignment = Alignment.CenterVertically) {
+                Text("Серверы", fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = GlassColors.Text,
+                     modifier = Modifier.weight(1f))
+                if (servers.isNotEmpty()) Text("${servers.size}", fontSize = 13.sp, color = GlassColors.Faint)
+            }
+            if (servers.isEmpty()) {
+                Text("Нет серверов.\n$emptyHint", Modifier.padding(14.dp), color = GlassColors.Dim, fontSize = 14.sp)
+            }
+            LazyColumn(contentPadding = PaddingValues(4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                items(servers, key = { it.name }) { s -> ServerRow(s, s.name == selected, latency, true) }
+            }
+        }
     }
 
     @OptIn(ExperimentalLayoutApi::class)
@@ -276,44 +302,34 @@ class MainActivity : ComponentActivity() {
         var adding by remember { mutableIntStateOf(0) }    // 1 = QR for the phone, 2 = type it
         val shield = remember { FocusRequester() }
         val addButton = remember { FocusRequester() }
-        Backdrop(dark) {
+        Backdrop {
             // 5 % safe area: some TVs still overscan
             Row(Modifier.fillMaxSize().padding(horizontal = 48.dp, vertical = 27.dp)) {
                 Column(Modifier.weight(1f).fillMaxHeight(), horizontalAlignment = Alignment.CenterHorizontally,
                        verticalArrangement = Arrangement.Center) {
-                    Text("Glass VPN", fontSize = 26.sp, fontWeight = FontWeight.SemiBold)
-                    Spacer(Modifier.height(16.dp))
-                    ShieldButton(st.state, dark, Modifier.focusRequester(shield)
-                        .focusProperties { right = addButton }) { toggle(st.state) }
-                    Spacer(Modifier.height(12.dp))
-                    StatusBlock(st)
-                    val problems = vpnApps.size + checks.count { it.isProblem }
-                    if (problems > 0) {
-                        Spacer(Modifier.height(12.dp))
-                        PillButton("⚠  Найдено проблем: $problems", dark) { page = Page.CHECK }
+                    Wordmark(30.sp)
+                    Spacer(Modifier.height(30.dp))
+                    GlassOrb(st.state, Modifier.focusRequester(shield).focusProperties { right = addButton }, 196.dp) {
+                        toggle(st.state)
                     }
+                    Spacer(Modifier.height(26.dp))
+                    StatusBlock(st)
+                    ProblemsChip()
                 }
-                Spacer(Modifier.width(32.dp))
-                Column(Modifier.weight(1.1f).fillMaxHeight()) {
+                Spacer(Modifier.width(40.dp))
+                Column(Modifier.weight(1.15f).fillMaxHeight()) {
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp),
                             verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        PillButton("Добавить", dark, Modifier.focusRequester(addButton)) { adding = 1 }
-                        PillButton("Обновить", dark) { background { store.updateSubscriptions() } }
-                        PillButton("Задержка", dark) { testLatency() }
-                        PillButton("Проверка сети", dark) { page = Page.CHECK }
-                        PillButton("Настройки", dark) { page = Page.SETTINGS }
+                        PillButton("Добавить", icon = Icons.Filled.Add, modifier = Modifier.focusRequester(addButton)) { adding = 1 }
+                        PillButton("Обновить", icon = Icons.Filled.Refresh) { background { store.updateSubscriptions() } }
+                        PillButton("Задержка", icon = Icons.Filled.PlayArrow) { testLatency() }
+                        PillButton("Проверка сети", icon = Icons.Filled.CheckCircle) { page = Page.CHECK }
+                        PillButton("Настройки", icon = Icons.Filled.Settings) { page = Page.SETTINGS }
                     }
-                    Spacer(Modifier.height(14.dp))
-                    if (busy) LinearProgressIndicator(Modifier.fillMaxWidth().padding(bottom = 8.dp))
-                    Glass(dark, Modifier.fillMaxWidth().weight(1f)) {
-                        if (servers.isEmpty()) {
-                            Text("Нет серверов.\nНажмите «Добавить» — подписку можно отправить с телефона по QR-коду",
-                                 Modifier.padding(20.dp), color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
-                        }
-                        LazyColumn(contentPadding = PaddingValues(4.dp)) {
-                            items(servers, key = { it.name }) { s -> ServerRow(s, s.name == selected, latency, dark) }
-                        }
-                    }
+                    Spacer(Modifier.height(18.dp))
+                    if (busy) LinearProgressIndicator(Modifier.fillMaxWidth().padding(bottom = 8.dp), color = GlassColors.Accent)
+                    ServerCard(Modifier.fillMaxWidth().weight(1f),
+                               "Нажмите «Добавить» — подписку можно отправить с телефона по QR-коду")
                 }
             }
         }
@@ -325,31 +341,48 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    @OptIn(ExperimentalLayoutApi::class)
     @Composable
     private fun ColumnScope.StatusBlock(st: VpnStatus) {
-        Text(STATE_TEXT[st.state]!!.replaceFirstChar { it.uppercase() }, fontSize = 20.sp,
-             fontWeight = FontWeight.Medium, modifier = Modifier.align(Alignment.CenterHorizontally))
-        if (st.state != VpnState.OFF && st.since != 0L) ConnectedFor(st.since)
-        val detail = when (st.state) {
-            VpnState.ON -> listOfNotNull(st.server, st.latency?.let { "$it мс" }).joinToString(" · ") +
-                           "\n↓ ${humanRate(st.down)}   ↑ ${humanRate(st.up)}"
-            VpnState.ERROR -> st.message ?: st.server
-            VpnState.BYPASS -> "${st.server}\nТрафик идёт мимо VPN, пока сервер не ответит"
-            VpnState.CONNECTING -> st.server
-            VpnState.OFF -> selected ?: "Добавьте подписку"
+        Row(Modifier.align(Alignment.CenterHorizontally), verticalAlignment = Alignment.CenterVertically) {
+            if (st.state != VpnState.OFF) {
+                Box(Modifier.size(9.dp).background(Color(stateColor(st.state)), CircleShape))
+                Spacer(Modifier.width(10.dp))
+            }
+            Text(STATE_TEXT[st.state]!!.replaceFirstChar { it.uppercase() }, fontSize = 21.sp,
+                 fontWeight = FontWeight.SemiBold, color = GlassColors.Text)
         }
-        Text(detail, fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f),
-             textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-             modifier = Modifier.align(Alignment.CenterHorizontally).padding(top = 4.dp))
+        if (st.state != VpnState.OFF && st.since != 0L) ConnectedFor(st.since)
+        val note = when (st.state) {
+            VpnState.ERROR -> st.message
+            VpnState.BYPASS -> "Трафик идёт мимо VPN, пока сервер не ответит"
+            VpnState.OFF -> if (servers.isEmpty()) "Добавьте подписку" else null
+            else -> null
+        }
+        if (note != null) Text(note, fontSize = 13.sp, color = GlassColors.Dim,
+                               textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                               modifier = Modifier.align(Alignment.CenterHorizontally).padding(top = 6.dp))
+        Spacer(Modifier.height(12.dp))
+        FlowRow(Modifier.align(Alignment.CenterHorizontally),
+                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
+                verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            val name = (if (st.state == VpnState.OFF) selected else st.server)?.takeIf { it.isNotEmpty() }
+            if (name != null) {
+                val (flag, rest) = splitFlag(name)
+                GlassChip(rest, leading = flag?.let { f -> { Text(f, fontSize = 14.sp) } })
+            }
+            if (st.state == VpnState.ON) {
+                st.latency?.let { ms -> GlassChip("$ms мс", leading = { SignalBars(ms) }) }
+                GlassChip("↓ ${humanRate(st.down)}   ↑ ${humanRate(st.up)}")
+            }
+        }
     }
 
     @Composable
     private fun CheckScreen(dark: Boolean) {
         androidx.activity.compose.BackHandler { page = Page.MAIN }
         val dim = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
-        val bg = if (dark) listOf(Color(0xFF0E1726), Color(0xFF1B1530), Color(0xFF0B1F24))
-                 else listOf(Color(0xFFDDE8FF), Color(0xFFF3E6FF), Color(0xFFDDF6F0))
-        Box(Modifier.fillMaxSize().background(Brush.linearGradient(bg))) {
+        Backdrop {
             LazyColumn(Modifier.fillMaxSize().systemBarsPadding().padding(horizontal = 16.dp),
                        verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 item {
@@ -429,26 +462,31 @@ class MainActivity : ComponentActivity() {
 
     @Composable
     private fun ServerRow(s: Server, isSelected: Boolean, lat: Map<String, Int?>, dark: Boolean) {
-        val tint = if (isSelected) (if (dark) Color.White.copy(alpha = 0.10f) else Color.White.copy(alpha = 0.55f))
-                   else Color.Transparent
-        Row(Modifier.fillMaxWidth().focusRing(zoom = 1f) { select(s.name) }.background(tint)
-                .padding(horizontal = 16.dp, vertical = 14.dp),
+        val shape = RoundedCornerShape(20.dp)
+        Row(Modifier.fillMaxWidth().focusRing(shape, zoom = 1f) { select(s.name) }
+                .then(if (isSelected) Modifier
+                    .background(Brush.linearGradient(GlassColors.AccentGradient.map { it.copy(alpha = 0.16f) }), shape)
+                    .border(1.dp, Brush.linearGradient(GlassColors.AccentGradient.map { it.copy(alpha = 0.7f) }), shape)
+                else Modifier)
+                .padding(horizontal = 12.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically) {
-            RadioButton(selected = isSelected, onClick = null, modifier = Modifier.size(20.dp))
-            Spacer(Modifier.width(12.dp))
+            ServerBadge(s.name)
+            Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
-                Text(s.name, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 15.sp)
-                Text("${s.type} · ${s.security}" + if (s.encryption != "none") " · pq" else "",
-                     fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
+                Text(splitFlag(s.name).second, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 16.sp,
+                     color = GlassColors.Text, fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal)
+                Text(s.subtitle(), fontSize = 12.sp, color = GlassColors.Faint, maxLines = 1)
             }
             if (s.name in lat) {
                 val ms = lat[s.name]
-                Text(ms?.let { "$it мс" } ?: "—", fontSize = 13.sp,
-                     color = when {
-                         ms == null -> Color(stateColor(VpnState.ERROR))
-                         ms < 150 -> Color(stateColor(VpnState.ON))
-                         else -> Color(stateColor(VpnState.CONNECTING))
-                     })
+                Text(ms?.let { "$it мс" } ?: "—", fontSize = 13.sp, color = GlassColors.Dim,
+                     style = androidx.compose.ui.text.TextStyle(fontFeatureSettings = "tnum"))
+                Spacer(Modifier.width(8.dp))
+                SignalBars(ms)
+            }
+            if (isSelected) {
+                Spacer(Modifier.width(10.dp))
+                Icon(Icons.Filled.CheckCircle, null, Modifier.size(20.dp), tint = GlassColors.Accent)
             }
         }
     }
@@ -483,7 +521,7 @@ private fun ColumnScope.ConnectedFor(since: Long) {
     LaunchedEffect(since) {
         while (true) { now = System.currentTimeMillis(); kotlinx.coroutines.delay(1000 - now % 1000) }
     }
-    Text(elapsed(now - since), fontSize = 28.sp, fontWeight = FontWeight.Light,
+    Text(elapsed(now - since), fontSize = 44.sp, fontWeight = FontWeight.Thin, color = GlassColors.Text,
          style = androidx.compose.ui.text.TextStyle(fontFeatureSettings = "tnum"),   // digits don't jitter
          modifier = Modifier.align(Alignment.CenterHorizontally).padding(top = 2.dp))
 }
@@ -495,47 +533,12 @@ internal fun elapsed(ms: Long): String {
     return if (d > 0) "$d д $hms" else hms
 }
 
-@Composable
-internal fun Glass(dark: Boolean, modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
-    val shape = RoundedCornerShape(24.dp)
-    Column(modifier.clip(shape)
-        .background(if (dark) Color.White.copy(alpha = 0.06f) else Color.White.copy(alpha = 0.45f))
-        .border(BorderStroke(1.dp, if (dark) Color.White.copy(alpha = 0.12f) else Color.White.copy(alpha = 0.8f)), shape)
-        .padding(6.dp), content = content)
-}
 
-/** The tray icon, large: a shield plus a status dot (none = off, pulsing amber = connecting). */
+/** Round frosted icon button (phone top bar). */
 @Composable
-private fun ColumnScope.ShieldButton(state: VpnState, dark: Boolean, modifier: Modifier = Modifier,
-                                     onClick: () -> Unit) {
-    val pulse by rememberInfiniteTransition(label = "pulse").animateFloat(
-        0.35f, 1f, infiniteRepeatable(tween(700), RepeatMode.Reverse), label = "a")
-    val ring by animateColorAsState(
-        if (state == VpnState.OFF) Color.White.copy(alpha = if (dark) 0.15f else 0.7f) else Color(stateColor(state)),
-        label = "ring")
-    val fg = if (dark) Color.White else Color(0xFF1C1C1E)
-    Box(modifier.align(Alignment.CenterHorizontally).size(180.dp).focusRing(CircleShape, onClick = onClick)
-            .background(Brush.radialGradient(
-                if (dark) listOf(Color.White.copy(alpha = 0.14f), Color.White.copy(alpha = 0.04f))
-                else listOf(Color.White.copy(alpha = 0.9f), Color.White.copy(alpha = 0.4f))))
-            .border(3.dp, ring.copy(alpha = if (state == VpnState.CONNECTING) pulse else ring.alpha), CircleShape),
+private fun RoundGlassButton(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, onClick: () -> Unit) {
+    Box(Modifier.size(42.dp).focusRing(CircleShape, onClick = onClick).glass(CircleShape, 0.9f),
         contentAlignment = Alignment.Center) {
-        Canvas(Modifier.size(84.dp)) {
-            val w = size.width
-            val h = size.height
-            val shield = Path().apply {
-                moveTo(w * 0.5f, h * 0.04f)
-                lineTo(w * 0.88f, h * 0.18f)
-                cubicTo(w * 0.88f, h * 0.55f, w * 0.75f, h * 0.80f, w * 0.5f, h * 0.96f)
-                cubicTo(w * 0.25f, h * 0.80f, w * 0.12f, h * 0.55f, w * 0.12f, h * 0.18f)
-                close()
-            }
-            drawPath(shield, fg, style = Stroke(width = w * 0.075f, join = StrokeJoin.Round))
-            if (state != VpnState.OFF) {
-                val c = Color(stateColor(state))
-                drawCircle(c.copy(alpha = if (state == VpnState.CONNECTING) pulse else 1f),
-                           radius = w * 0.14f, center = Offset(w * 0.5f, h * 0.48f))
-            }
-        }
+        Icon(icon, label, Modifier.size(20.dp), tint = GlassColors.Text)
     }
 }

@@ -21,6 +21,7 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.asImageBitmap
@@ -32,7 +33,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import kotlinx.coroutines.delay
 
-internal val FOCUS = Color(0xFF0A84FF)
+internal val FOCUS = Color.White   // a white glow reads on the dark glass and is no state colour
 
 fun isTv(ctx: Context): Boolean =
     ctx.packageManager.hasSystemFeature(PackageManager.FEATURE_LEANBACK) ||
@@ -49,10 +50,9 @@ fun Modifier.focusRing(shape: Shape = RoundedCornerShape(14.dp), zoom: Float = 1
         val scale by animateFloatAsState(if (focused) zoom else 1f, label = "zoom")
         this.scale(scale)
             .onFocusChanged { focused = it.isFocused }
-            // blue, not green: green already means "connected"
-            .border(3.dp, if (focused) FOCUS else Color.Transparent, shape)
+            .border(2.5.dp, if (focused) FOCUS.copy(alpha = 0.95f) else Color.Transparent, shape)
             .clip(shape)
-            .background(if (focused) FOCUS.copy(alpha = 0.10f) else Color.Transparent)
+            .background(if (focused) FOCUS.copy(alpha = 0.12f) else Color.Transparent)
             .clickable(onClick = onClick)
     }
 
@@ -65,18 +65,21 @@ fun LinkButton(text: String, modifier: Modifier = Modifier, onClick: () -> Unit)
 
 /** Big labelled button for the TV main screen. */
 @Composable
-fun PillButton(text: String, dark: Boolean, modifier: Modifier = Modifier, selected: Boolean = false,
+fun PillButton(text: String, @Suppress("UNUSED_PARAMETER") dark: Boolean = true, modifier: Modifier = Modifier,
+               selected: Boolean = false, icon: androidx.compose.ui.graphics.vector.ImageVector? = null,
                onClick: () -> Unit) {
     val shape = RoundedCornerShape(50)
-    Text(text, fontSize = 16.sp, textAlign = TextAlign.Center,
-         color = if (selected) Color.White else Color.Unspecified,
-         modifier = modifier.focusRing(shape, onClick = onClick)
-             .background(when {
-                 selected -> Color(0xFF3A3A3C)       // dark, not blue: blue is the focus
-                 dark -> Color.White.copy(alpha = 0.10f)
-                 else -> Color.White.copy(alpha = 0.6f)
-             })
-             .padding(horizontal = 20.dp, vertical = 12.dp))
+    Row(modifier.focusRing(shape, onClick = onClick)
+            .then(if (selected) Modifier.background(Brush.linearGradient(GlassColors.AccentGradient.map { it.copy(alpha = 0.55f) }), shape)
+                  else Modifier.glass(shape, 0.85f))
+            .padding(horizontal = 18.dp, vertical = 11.dp),
+        verticalAlignment = Alignment.CenterVertically) {
+        if (icon != null) {
+            androidx.compose.material3.Icon(icon, null, Modifier.size(18.dp), tint = GlassColors.Text)
+            Spacer(Modifier.width(8.dp))
+        }
+        Text(text, fontSize = 15.sp, color = GlassColors.Text, fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal)
+    }
 }
 
 /** Focus [requester] once the screen is shown (TV: the remote needs a starting point). */
@@ -106,8 +109,8 @@ fun AddFromPhoneDialog(dark: Boolean, onDismiss: () -> Unit, onText: (String) ->
     }
     val focus = remember { FocusRequester() }
     Dialog(onDismissRequest = onDismiss) {
-        Column(Modifier.clip(RoundedCornerShape(28.dp))
-                   .background(if (dark) Color(0xFF1C2436) else Color(0xFFF4F6FF)).padding(28.dp),
+        Column(Modifier.background(Color(0xFC111726), RoundedCornerShape(32.dp)).glass(RoundedCornerShape(32.dp))
+                   .padding(28.dp),
                horizontalAlignment = Alignment.CenterHorizontally) {
             Text("Добавить с телефона", fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.height(12.dp))
