@@ -28,7 +28,7 @@ mkdir -p "$DEST/colloid-apps"
 python3 - "$(readlink -f "$COLLOID")" "$DEST/colloid-apps" <<'PY'
 import os, re, sys
 src, dst = sys.argv[1], sys.argv[2]
-WHITELIST = {"systemsettings", "google-chrome", "chromium", "code", "visual-studio-code",
+WHITELIST = {"systemsettings", "anydesk", "google-chrome", "chromium", "code", "visual-studio-code",
              "firefox", "thunderbird", "vlc", "gimp", "inkscape", "krita", "obs", "discord",
              "spotify", "slack", "zoom", "libreoffice-startcenter", "libreoffice-writer",
              "libreoffice-calc", "libreoffice-impress", "virtualbox", "steam",
