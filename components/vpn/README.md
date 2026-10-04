@@ -56,6 +56,10 @@ script that execs Python.
 
 ## Android
 
+Ready-made APKs: **[phones (arm64)](https://github.com/GrigoriyIT/plasma-glass/releases/latest/download/GlassVPN-arm64.apk)** ·
+**[TVs and 32-bit devices (armv7)](https://github.com/GrigoriyIT/plasma-glass/releases/latest/download/GlassVPN-armv7.apk)** · [releases](https://github.com/GrigoriyIT/plasma-glass/releases/latest).
+To build it yourself:
+
 ```bash
 cd components/vpn/android
 ./fetch-libs.sh                 # Xray (libv2ray.aar) and hev-socks5-tunnel, pinned + sha256

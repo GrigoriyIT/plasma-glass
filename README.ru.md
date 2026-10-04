@@ -6,6 +6,20 @@
 
 [English version](README.md)
 
+## 📲 Glass VPN для Android и Android TV
+
+VPN-клиент из этого репозитория: VLESS (Reality, gRPC, XHTTP, ML-KEM), российские сайты
+напрямую, остальное через VPN. Телефоны и телевизоры на Android 9 и новее.
+
+**[⬇ Скачать для телефона](https://github.com/GrigoriyIT/plasma-glass/releases/latest/download/GlassVPN-arm64.apk)** · **[⬇ Скачать для телевизора](https://github.com/GrigoriyIT/plasma-glass/releases/latest/download/GlassVPN-armv7.apk)** · [все версии и что нового](https://github.com/GrigoriyIT/plasma-glass/releases/latest)
+
+Ссылки всегда ведут на последнюю версию. «Для телевизора» — это сборка для 32-битных систем
+(например, Xiaomi Mi TV 4S/4A); если на телефоне не ставится версия «для телефона», подойдёт она же.
+Подробнее — в [описании Glass VPN](components/vpn/README.md#android).
+
+| ![Glass VPN на телевизоре: стеклянная кнопка-сфера, таймер подключения и список серверов](docs/images/glassvpn-tv.png) | ![Glass VPN на телефоне](docs/images/glassvpn-phone.png) |
+|---|---|
+
 ![Рабочий стол из матового стекла: активное окно Dolphin, неактивная Konsole за ним, адаптивная верхняя панель и док](docs/images/desktop.jpg)
 
 | ![Меню программ с колонкой категорий](docs/images/launcher.jpg) | ![Выпадающий терминал Guake](docs/images/guake.jpg) |
