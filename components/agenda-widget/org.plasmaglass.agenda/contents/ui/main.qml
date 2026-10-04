@@ -4,8 +4,11 @@ import QtQuick.LocalStorage
 import org.kde.plasma.plasmoid
 import org.kde.plasma.core as PlasmaCore
 import "../code/ics.js" as Ics
+import "../code/workcal.js" as Work
 
-// Glass agenda card: upcoming events from iCal links (Google, Yandex, Nextcloud…).
+// Glass agenda card: upcoming events from iCal links (Google, Yandex, Nextcloud…)
+// and the nearest weekday that is a day off by the production calendar
+// (federal + the selected region's own holidays).
 PlasmoidItem {
     id: root
 
@@ -22,6 +25,30 @@ PlasmoidItem {
     readonly property bool anyFailed: urls.some(u => failed[u])
     property real updated: 0
     property real clock: Date.now()
+
+    readonly property string region: Plasmoid.configuration.region
+    property var federal: ({})      // "YYYY-MM-DD" -> { off, short, moved }, from xmlcalendar.ru
+    readonly property var nextOff: Work.nextWeekdayOff(new Date(clock), federal, region, 120)
+    readonly property bool regionMissing: !Work.hasYear(region, new Date(clock).getFullYear())
+
+    function fetchWorkCalendar() {
+        const year = new Date().getFullYear();
+        [year, year + 1].forEach(y => {
+            const x = new XMLHttpRequest();
+            x.onreadystatechange = function () {
+                if (x.readyState !== XMLHttpRequest.DONE || x.status !== 200)
+                    return;   // next year's calendar appears only after the government decree
+                try {
+                    federal = Object.assign({}, federal, Work.parseFederal(x.responseText));
+                    save();
+                } catch (e) {
+                    console.warn("agenda: work calendar", e);
+                }
+            };
+            x.open("GET", "https://xmlcalendar.ru/data/ru/" + y + "/calendar.json");
+            x.send();
+        });
+    }
 
     function dayStart(t) {
         const d = new Date(t);
@@ -67,12 +94,23 @@ PlasmoidItem {
         all = all.filter(e => e.end > clock && e.t < to)
                  .sort((a, b) => (a.allDay === b.allDay ? 0 : a.allDay ? -1 : 1) || a.t - b.t);
         for (let d = from; d < to; d += 86400e3) {
-            const next = new Date(new Date(d).getFullYear(), new Date(d).getMonth(), new Date(d).getDate() + 1).getTime();
+            const date = new Date(d);
+            const next = new Date(date.getFullYear(), date.getMonth(), date.getDate() + 1).getTime();
             const list = all.filter(e => e.t < next && e.end > d).sort((a, b) => (b.allDay - a.allDay) || a.t - b.t);
+            const info = Work.dayInfo(date, federal, region);
+            if (info.off && info.name && date.getDay() !== 0 && date.getDay() !== 6)
+                list.unshift(Object.assign({ t: d, end: next, allDay: true, holiday: true }, holidayText(info.name)));
             if (!list.length)
                 continue;
             out.push({ header: true, t: d });
             list.forEach(e => out.push(Object.assign({ header: false, day: d }, e)));
+        }
+        // the nearest weekday off is always listed, even beyond the window
+        const o = nextOff;
+        if (o && o.date.getTime() >= to) {
+            const t = o.date.getTime();
+            out.push({ header: true, t: t });
+            out.push(Object.assign({ header: false, day: t, t: t, end: t + 86400e3, allDay: true, holiday: true }, holidayText(o.name)));
         }
         return out;
     }
@@ -86,7 +124,14 @@ PlasmoidItem {
         const s = Qt.locale("ru_RU").toString(new Date(t), "dddd, d MMMM");
         return s.charAt(0).toUpperCase() + s.slice(1);
     }
+    // "День Республики (перенос с 11 октября)" -> title + a dim second line
+    function holidayText(name) {
+        const m = /^(.*?)\s*\((.*)\)$/.exec(name);
+        return m ? { summary: m[1] || "Выходной", location: m[2] } : { summary: name, location: "" };
+    }
     function timeLabel(e) {
+        if (e.holiday)
+            return "выходной";
         if (e.allDay)
             return "весь день";
         const f = t => Qt.formatTime(new Date(t), "HH:mm");
@@ -101,7 +146,7 @@ PlasmoidItem {
     }
     function save() {
         db().transaction(tx => tx.executeSql("INSERT OR REPLACE INTO kv VALUES('events', ?)",
-                                             [JSON.stringify({ perCalendar, updated })]));
+                                             [JSON.stringify({ perCalendar, updated, federal })]));
     }
     Component.onCompleted: {
         db().readTransaction(tx => {
@@ -110,9 +155,11 @@ PlasmoidItem {
                 const b = JSON.parse(rs.rows.item(0).v);
                 perCalendar = b.perCalendar;
                 updated = b.updated;
+                federal = b.federal || {};
             }
         });
         fetchAll();
+        fetchWorkCalendar();
     }
     onUrlsChanged: {
         // forget calendars that were removed or edited (e.g. a half-pasted link)
@@ -128,6 +175,12 @@ PlasmoidItem {
         running: true
         repeat: true
         onTriggered: root.fetchAll()
+    }
+    Timer {
+        interval: 24 * 3600e3
+        running: true
+        repeat: true
+        onTriggered: root.fetchWorkCalendar()
     }
     Timer {
         interval: 60e3
@@ -170,6 +223,15 @@ PlasmoidItem {
                     font.pixelSize: 11
                     color: "#ff9f0a"
                 }
+            }
+
+            Text {
+                visible: root.regionMissing
+                Layout.fillWidth: true
+                wrapMode: Text.WordWrap
+                text: "Региональные выходные на " + new Date(root.clock).getFullYear() + " год не внесены — учтены только федеральные"
+                font.pixelSize: 11
+                color: root.dim
             }
 
             ListView {
@@ -215,7 +277,7 @@ PlasmoidItem {
                         anchors.top: parent.top
                         anchors.bottom: parent.bottom
                         anchors.margins: 5
-                        color: root.palette[(row.modelData.calendar || 0) % root.palette.length]
+                        color: row.modelData.holiday ? Qt.rgba(1, 1, 1, 0.35) : root.palette[(row.modelData.calendar || 0) % root.palette.length]
                     }
                     Column {
                         visible: !row.modelData.header

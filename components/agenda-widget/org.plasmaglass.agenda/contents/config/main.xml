@@ -8,6 +8,10 @@
       <label>iCal links, one per line</label>
       <default></default>
     </entry>
+    <entry name="region" type="String">
+      <label>Region code for regional days off ("" = federal only, "02" = Bashkortostan)</label>
+      <default>02</default>
+    </entry>
     <entry name="days" type="Int">
       <label>How many days ahead to show</label>
       <default>7</default>
