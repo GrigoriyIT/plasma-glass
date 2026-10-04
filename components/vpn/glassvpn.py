@@ -13,10 +13,19 @@ Two child processes:
   so nothing here runs as root. macOS has no capabilities: sing-box is started
   by a small root helper (macos/glassvpn-helper, allowed via sudoers) that also
   points the system DNS at the tunnel while it is up.
+
+Routing, first match wins: LAN direct; the "only through the VPN" list (apps or
+domains; Claude and Anthropic by default) through a dedicated Xray port that
+always goes to the server — never direct, not even while the server is down and
+everything else falls back to direct, and blocked while the VPN is off (sing-box
+then keeps running as a guard); the "always direct" list; the Russian zone
+direct; the rest through the server. Recovering from sleep or a dead server only
+restarts Xray: the TUN stays, so nothing on the VPN-only list slips out meanwhile.
 """
 import base64
 import json
 import os
+import re
 import signal
 import socket
 import subprocess
@@ -62,6 +71,7 @@ XRAY_CONFIG = STATE_DIR / "xray.json"
 XRAY_LOG = STATE_DIR / "xray.log"
 SOCKS_PORT = 10808
 PROBE_SOCKS_PORT = 10809        # a second Xray inbound that always goes to the server
+VPN_ONLY_PORT = 10810           # and a third, for the "only through the VPN" list: never direct
 APPLETSRC = Path.home() / ".config/plasma-org.kde.plasma.desktop-appletsrc"
 PROBE_HOST = "connectivitycheck.gstatic.com"      # GET /generate_204 through the server
 
@@ -76,6 +86,9 @@ RULESET_URL = {
     "geoip-ru": "https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/geoip-ru.srs",
 }
 RU_SUFFIXES = ["ru", "su", "xn--p1ai", "xn--p1acf", "xn--d1acj3b"]  # .рф .рус .дети
+# "Only through the VPN" by default: Anthropic refuses requests from Russian IPs,
+# so Claude must never fall back to the direct route
+DEFAULT_VPN_ONLY = ["claude", "Claude.app", "anthropic.com", "claude.ai", "claude.com"]
 PRIVATE_NETS = ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16",
                 "100.64.0.0/10", "fc00::/7", "fe80::/10"]
 
@@ -157,7 +170,8 @@ def fetch_subscription(url):
 def xray_config(s, server_ip, bypass=False):
     """Xray client: SOCKS5 on localhost -> VLESS to the server.
 
-    A second SOCKS port always goes to the server (the live check). With bypass,
+    A second SOCKS port always goes to the server (the live check), and so does a third
+    (the "only through the VPN" list, which must never leave directly). With bypass,
     the main port sends everything direct: the server is unreachable (e.g. mobile
     internet on a whitelist) and traffic shouldn't hang on a dead tunnel meanwhile.
     """
@@ -186,7 +200,9 @@ def xray_config(s, server_ip, bypass=False):
         "inbounds": [{"tag": "socks", "listen": "127.0.0.1", "port": SOCKS_PORT, "protocol": "socks",
                       "settings": {"udp": True, "auth": "noauth"}},
                      {"tag": "probe", "listen": "127.0.0.1", "port": PROBE_SOCKS_PORT, "protocol": "socks",
-                      "settings": {"auth": "noauth"}}],
+                      "settings": {"auth": "noauth"}},
+                     {"tag": "vpnonly", "listen": "127.0.0.1", "port": VPN_ONLY_PORT, "protocol": "socks",
+                      "settings": {"udp": True, "auth": "noauth"}}],
         "outbounds": [{"protocol": "vless", "tag": "proxy",
                        "settings": {"vnext": [{"address": server_ip or s["host"], "port": int(s["port"]),
                                                "users": [user]}]},
@@ -194,13 +210,35 @@ def xray_config(s, server_ip, bypass=False):
                       # leaves through the TUN, where sing-box sends Xray's traffic out directly
                       {"protocol": "freedom", "tag": "direct"}],
         "routing": {"rules": [
-            {"type": "field", "inboundTag": ["probe"], "outboundTag": "proxy"},
+            {"type": "field", "inboundTag": ["probe", "vpnonly"], "outboundTag": "proxy"},
             *([{"type": "field", "inboundTag": ["socks"], "outboundTag": "direct"}] if bypass else []),
         ]},
     }
 
 
-def build_config(server, direct_hosts, local_dns=None):
+def match_rules(entries):
+    """List entries -> sing-box rule matchers: a process name ("claude"), an app
+    bundle ("Telegram.app"), a path prefix ("/usr/bin/curl") or a domain ("claude.ai")."""
+    names, paths, domains = [], [], []
+    for e in (x.strip() for x in entries):
+        if not e:
+            continue
+        if e.endswith(".app"):
+            paths.append("/" + re.escape(e) + "/")
+        elif "/" in e:
+            paths.append("^" + re.escape(e))
+        elif "." in e:
+            domains.append(e.lstrip("."))
+        else:
+            names.append(e)
+    return ([{"process_name": names}] if names else []) + \
+           ([{"process_path_regex": paths}] if paths else []) + \
+           ([{"domain_suffix": domains}] if domains else [])
+
+
+def build_config(server, direct_hosts, local_dns=None, vpn_only=(), direct_apps=(), guard=False):
+    """guard: the VPN is off — everything direct, except the "only through the VPN"
+    list, which is blocked rather than let out with the local address."""
     ru = {"rule_set": ["geosite-ru"]}
     # on macOS the system resolver points at the tunnel while it is up, so "local"
     # must be the network's own DNS server, asked directly
@@ -219,7 +257,7 @@ def build_config(server, direct_hosts, local_dns=None):
                 {"domain_suffix": RU_SUFFIXES, "server": "local"},
                 {**ru, "server": "local"},
             ],
-            "final": "remote",
+            "final": "local" if guard else "remote",
             "strategy": "ipv4_only",  # most home networks here have no IPv6
         },
         "inbounds": [{
@@ -234,6 +272,7 @@ def build_config(server, direct_hosts, local_dns=None):
         }],
         "outbounds": [
             {"type": "socks", "tag": "proxy", "server": "127.0.0.1", "server_port": SOCKS_PORT, "version": "5"},
+            {"type": "socks", "tag": "vpn-only", "server": "127.0.0.1", "server_port": VPN_ONLY_PORT, "version": "5"},
             {"type": "direct", "tag": "direct"},
         ],
         "route": {
@@ -242,6 +281,9 @@ def build_config(server, direct_hosts, local_dns=None):
                 {"protocol": "dns", "action": "hijack-dns"},
                 *direct_rules,
                 {"ip_is_private": True, "outbound": "direct"},
+                # before the Russian zone: these go through the server even to .ru sites
+                *({**m, "action": "reject"} if guard else {**m, "outbound": "vpn-only"} for m in match_rules(vpn_only)),
+                *({**m, "outbound": "direct"} for m in match_rules(direct_apps)),
                 {"domain_suffix": RU_SUFFIXES, "outbound": "direct"},
                 {"rule_set": ["geosite-ru", "geoip-ru"], "outbound": "direct"},
             ],
@@ -250,7 +292,7 @@ def build_config(server, direct_hosts, local_dns=None):
                  "download_detour": "direct", "update_interval": "7d"}
                 for tag, url in RULESET_URL.items()
             ],
-            "final": "proxy",
+            "final": "direct" if guard else "proxy",
             "auto_detect_interface": True,
             "default_domain_resolver": "local",
         },
@@ -510,7 +552,12 @@ def helper_stop():
 def mac_hide_dock_icon():
     try:
         from AppKit import NSApplication, NSApplicationActivationPolicyAccessory
+        from Foundation import NSActivityUserInitiatedAllowingIdleSystemSleep, NSProcessInfo
         NSApplication.sharedApplication().setActivationPolicy_(NSApplicationActivationPolicyAccessory)
+        # no App Nap: a background menu bar app gets its timers throttled, and the
+        # watchdog would take a late tick for a sleep
+        mac_hide_dock_icon.activity = NSProcessInfo.processInfo().beginActivityWithOptions_reason_(
+            NSActivityUserInitiatedAllowingIdleSystemSleep, "VPN watchdog")
     except ImportError:
         pass
 
@@ -547,6 +594,9 @@ class Tray:
         self.rates = (0.0, 0.0)
         self.settings = load(SETTINGS, {"subscriptions": [], "selected": None, "autoconnect": True})
         self.settings.setdefault("fallback_direct", True)
+        self.settings.setdefault("vpn_only", list(DEFAULT_VPN_ONLY))
+        self.settings.setdefault("direct_apps", [])
+        self.guard = False                # sing-box up with the VPN off, blocking the VPN-only list
         self.servers = load(SERVERS, [])
         self.proc = None
         self.xray = None
@@ -567,6 +617,8 @@ class Tray:
         self.pulse.start()
         if self.settings.get("autoconnect") and self.current():
             QTimer.singleShot(1500, self.connect)
+        elif self.settings.get("vpn_only"):
+            QTimer.singleShot(1500, self.start_guard)
         QTimer.singleShot(4000, lambda: self.update_subscriptions(quiet=True))
         # repair an autostart entry written with a bare "Exec=glassvpn"
         if not IS_MAC and AUTOSTART.exists() and "Exec=glassvpn\n" in AUTOSTART.read_text():
@@ -590,6 +642,10 @@ class Tray:
             lines.append(f"Сервер: {cur['name']}")
         if self.state == BYPASS:
             lines.append("Трафик идёт мимо VPN, пока сервер не ответит")
+        if self.settings.get("vpn_only") and self.state in (BYPASS, ERROR):
+            lines.append("Приложения «только через VPN» ждут сервер")
+        if self.guard:
+            lines.append("Приложения «только через VPN» заблокированы")
         if self.state == ON:
             if self.probe_ms:
                 lines.append(f"Задержка: {self.probe_ms} мс")
@@ -605,9 +661,10 @@ class Tray:
         now = time.time()
         slept, self.last_tick = now - self.last_tick > 20, now
         if slept and self.want_up:
-            # after sleep the network often comes back with another address and the
-            # long-lived links (Xray's gRPC, DoH) hang instead of failing: start afresh
-            QTimer.singleShot(5000, self.reconnect)
+            # after sleep the network often comes back with another address and Xray's
+            # long-lived links hang instead of failing: give it fresh ones. Only Xray —
+            # the TUN stays, so nothing slips out directly meanwhile
+            QTimer.singleShot(5000, self.restart_xray)
         fg = panel_text_color()
         if fg != self.fg:
             self.fg = fg
@@ -650,7 +707,7 @@ class Tray:
                     self.set_state(BYPASS)
                 else:
                     self.set_state(ERROR)
-            # still broken: the network may have changed under the cores — restart them,
+            # still broken: the network may have changed under Xray — restart it,
             # backing off while there is no network at all
             # (not while bypassing: that would put traffic back on the dead tunnel every time)
             if self.fails >= 6 and not self.bypass and time.time() - self.last_reconnect >= self.reconnect_gap:
@@ -669,19 +726,14 @@ class Tray:
             return
         ips = resolve(s["host"])
         save(XRAY_CONFIG, xray_config(s, ips[0] if ips else None, self.bypass))
-        if self.xray and self.xray.poll() is None:
-            self.xray.send_signal(signal.SIGTERM)
-            try:
-                self.xray.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                self.xray.kill()
+        self.stop_xray()
         self.xray = subprocess.Popen([XRAY, "run", "-c", str(XRAY_CONFIG)],
                                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     def reconnect(self):
         if self.want_up:
             self.last_reconnect = time.time()
-            self.connect()
+            self.restart_xray()
 
     def current(self):
         sel = self.settings.get("selected")
@@ -723,6 +775,11 @@ class Tray:
 
         m.addSeparator()
         self.build_sources_menu(m.addMenu("Подписки и ключи"))
+        rm = m.addMenu("Правила для приложений")
+        rm.addAction(f"Только через VPN ({len(self.settings.get('vpn_only', []))})…").triggered.connect(
+            lambda: self.edit_list("vpn_only"))
+        rm.addAction(f"Всегда мимо VPN ({len(self.settings.get('direct_apps', []))})…").triggered.connect(
+            lambda: self.edit_list("direct_apps"))
         fd = m.addAction("Напрямую, если сервер недоступен")
         fd.setCheckable(True)
         fd.setChecked(self.settings.get("fallback_direct", True))
@@ -737,6 +794,34 @@ class Tray:
         m.addSeparator()
         m.addAction("Выход").triggered.connect(self.quit)
         self.refresh_icon()
+
+    LIST_PROMPT = {
+        "vpn_only": "Только через VPN — никогда напрямую: если сервер недоступен или VPN выключен,\n"
+                    "у них просто нет сети. Даже российские сайты они открывают через VPN.",
+        "direct_apps": "Всегда мимо VPN — напрямую, даже когда VPN включён.",
+    }
+
+    def edit_list(self, key):
+        text, ok = QInputDialog.getMultiLineText(
+            None, "Glass VPN", self.LIST_PROMPT[key] + "\n\nПо одному в строке: имя процесса (claude), "
+            "приложение (Telegram.app), путь (/usr/bin/curl) или домен (claude.ai):",
+            "\n".join(self.settings.get(key, [])))
+        if not ok:
+            return
+        self.settings[key] = [l.strip() for l in text.splitlines() if l.strip()]
+        save(SETTINGS, self.settings)
+        self.apply_rules()
+
+    def apply_rules(self):
+        """New lists take effect: rebuild sing-box in whatever mode it is in."""
+        if self.want_up:
+            self.connect()
+        elif self.settings.get("vpn_only"):
+            self.start_guard()
+        elif self.guard:
+            self.stop_process()
+            self.guard = False
+        self.rebuild_menu()
 
     def build_sources_menu(self, sm):
         subs = self.settings.get("subscriptions", [])
@@ -771,7 +856,6 @@ class Tray:
             self.settings["selected"] = self.servers[0]["name"] if self.servers else None
             save(SETTINGS, self.settings)
             if self.want_up:
-                self.stop_process()
                 if self.servers:
                     self.connect()
                 else:
@@ -872,7 +956,6 @@ class Tray:
         self.settings["selected"] = name
         save(SETTINGS, self.settings)
         if self.want_up:
-            self.stop_process()
             self.connect()
         else:
             self.rebuild_menu()
@@ -882,6 +965,34 @@ class Tray:
         return (self.proc is not None and self.proc.poll() is None
                 and self.xray is not None and self.xray.poll() is None)
 
+    def sb_config(self, s, direct, guard=False):
+        return build_config(s, direct, mac_system_dns() if IS_MAC else None,
+                            self.settings.get("vpn_only", []), self.settings.get("direct_apps", []), guard)
+
+    def run_sing_box(self):
+        """Start sing-box with SB_CONFIG, replacing the running one. On macOS the helper
+        swaps it in place, keeping the DNS on the tunnel; True on success."""
+        if IS_MAC:
+            try:
+                self.proc = HelperProc(SB_CONFIG)
+            except (RuntimeError, OSError, ValueError, subprocess.SubprocessError) as e:
+                self.proc = None
+                self.notify("Glass VPN", f"Не удалось поднять туннель: {e}")
+                return False
+        else:
+            self.stop_sing_box()
+            self.proc = subprocess.Popen([SING_BOX, "run", "-c", str(SB_CONFIG)],
+                                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return True
+
+    def check_configs(self, *cmds):
+        for cmd in cmds:
+            check = subprocess.run(cmd, capture_output=True, text=True)
+            if check.returncode != 0:
+                self.notify("Glass VPN", "Ошибка конфигурации: " + (check.stderr or check.stdout)[-200:])
+                return False
+        return True
+
     def connect(self):
         s = self.current()
         if not s:
@@ -889,64 +1000,85 @@ class Tray:
             return
         STATE_DIR.mkdir(parents=True, exist_ok=True)
         CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        if IS_MAC:   # stop first: the old tunnel's DNS override would hide the real resolver
-            self.stop_process()
         if not self.want_up:
             self.bypass = False      # a fresh start tries the server first
         server_ips = resolve(s["host"])
         direct = pptp_gateways() + server_ips
         save(XRAY_CONFIG, xray_config(s, server_ips[0] if server_ips else None, self.bypass))
-        save(SB_CONFIG, build_config(s, direct, mac_system_dns() if IS_MAC else None))
-        for cmd in ([XRAY, "run", "-test", "-c", str(XRAY_CONFIG)], [SING_BOX, "check", "-c", str(SB_CONFIG)]):
-            check = subprocess.run(cmd, capture_output=True, text=True)
-            if check.returncode != 0:
-                self.notify("Glass VPN", "Ошибка конфигурации: " + (check.stderr or check.stdout)[-200:])
-                return
-        self.stop_process()
+        save(SB_CONFIG, self.sb_config(s, direct))
+        if not self.check_configs([XRAY, "run", "-test", "-c", str(XRAY_CONFIG)],
+                                  [SING_BOX, "check", "-c", str(SB_CONFIG)]):
+            return
+        # the TUN is replaced, never taken down first: the VPN-only list has no gap to slip through
+        self.stop_xray()
         self.xray = subprocess.Popen([XRAY, "run", "-c", str(XRAY_CONFIG)],
                                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        if IS_MAC:
-            try:
-                self.proc = HelperProc(SB_CONFIG)
-            except (RuntimeError, OSError, ValueError, subprocess.SubprocessError) as e:
-                self.stop_process()
-                self.want_up = False
-                self.set_state(ERROR)
-                self.notify("Glass VPN", f"Не удалось поднять туннель: {e}")
-                return
-        else:
-            self.proc = subprocess.Popen([SING_BOX, "run", "-c", str(SB_CONFIG)],
-                                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        self.want_up = True
+        if not self.run_sing_box():
+            self.stop_process()
+            self.want_up = self.guard = False
+            self.set_state(ERROR)
+            return
+        self.want_up, self.guard = True, False
         self.fails, self.probe_ms, self.last_bytes = 0, None, None
         self.set_state(CONNECTING)
         self.settings["selected"] = s["name"]
         save(SETTINGS, self.settings)
         QTimer.singleShot(1500, self.rebuild_menu)
 
+    def start_guard(self):
+        """VPN off, but the "only through the VPN" list stays blocked instead of going direct."""
+        STATE_DIR.mkdir(parents=True, exist_ok=True)
+        CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        save(SB_CONFIG, self.sb_config(self.current(), pptp_gateways(), guard=True))
+        if not self.check_configs([SING_BOX, "check", "-c", str(SB_CONFIG)]):
+            return
+        self.stop_xray()
+        self.guard = self.run_sing_box()
+        self.rebuild_menu()
+
     def disconnect(self):
         self.want_up = False
-        self.stop_process()
+        if self.settings.get("vpn_only"):
+            self.start_guard()
+        else:
+            self.stop_process()
         self.set_state(OFF)
         self.rebuild_menu()
 
-    def stop_process(self):
-        for p in (self.proc, self.xray):
-            if p and p.poll() is None:
-                p.send_signal(signal.SIGTERM)
-                try:
-                    p.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    p.kill()
+    @staticmethod
+    def stop_child(p):
+        if p and p.poll() is None:
+            p.send_signal(signal.SIGTERM)
+            try:
+                p.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                p.kill()
+
+    def stop_xray(self):
+        self.stop_child(self.xray)
+        self.xray = None
+
+    def stop_sing_box(self):
+        self.stop_child(self.proc)
         if IS_MAC and isinstance(self.proc, HelperProc) and self.proc.poll() is not None:
             helper_stop()   # sing-box died on its own: still give the DNS back
-        self.proc = self.xray = None
+        self.proc = None
+
+    def stop_process(self):
+        self.stop_sing_box()
+        self.stop_xray()
+        self.guard = False
 
     def check_process(self):
-        # restart sing-box if it died while the user wants the VPN up
         if self.want_up and not self.is_up():
+            if self.proc is not None and self.proc.poll() is None:
+                self.restart_xray()      # only Xray died: the TUN is fine
+                return
+            # restart sing-box if it died while the user wants the VPN up
             self.notify("Glass VPN", "Соединение прервалось, переподключаюсь…")
             self.connect()
+        elif self.guard and (self.proc is None or self.proc.poll() is not None):
+            self.start_guard()
 
     def set_fallback_direct(self, on):
         self.settings["fallback_direct"] = on
