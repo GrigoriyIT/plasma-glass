@@ -6,7 +6,8 @@ import org.kde.plasma.plasmoid
 // with a single thin light rim. Desktop widgets are drawn inside the desktop
 // window, so KWin cannot blur behind them; the blur is made here from the
 // containment's wallpaper item. Without a wallpaper item it falls back to a
-// plain translucent card. (Same file in every Plasma Glass desktop widget.)
+// plain translucent card; on the macOS host the window itself is blurred by the
+// system. (Same file in every Plasma Glass desktop widget.)
 Item {
     id: card
 
@@ -70,7 +71,8 @@ Item {
     Rectangle {
         anchors.fill: parent
         radius: card.radius
-        color: Qt.rgba(0.09, 0.09, 0.10, card.backdrop ? 0.52 : 0.64)
+        // lighter where the OS itself blurs behind the window (macOS host)
+        color: Qt.rgba(0.09, 0.09, 0.10, card.backdrop ? 0.52 : Plasmoid.systemBlur ? 0.18 : 0.64)
     }
     // faint sheen on the upper half, as on the dock glass
     Rectangle {

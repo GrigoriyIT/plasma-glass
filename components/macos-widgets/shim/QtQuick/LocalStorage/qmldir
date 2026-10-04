@@ -1,0 +1,2 @@
+module QtQuick.LocalStorage
+singleton LocalStorage 1.0 LocalStorage.qml

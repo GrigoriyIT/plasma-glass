@@ -1,0 +1,2 @@
+module org.kde.plasma.core
+singleton Types 1.0 Types.qml

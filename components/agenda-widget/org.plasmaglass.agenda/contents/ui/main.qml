@@ -7,6 +7,7 @@ import "../code/ics.js" as Ics
 import "../code/workcal.js" as Work
 
 // Glass agenda card: upcoming events from iCal links (Google, Yandex, Nextcloud…)
+// — or, on the macOS host, from the system Calendar (Plasmoid.systemCalendar) —
 // and the nearest weekday that is a day off by the production calendar
 // (federal + the selected region's own holidays).
 PlasmoidItem {
@@ -16,13 +17,15 @@ PlasmoidItem {
     preferredRepresentation: fullRepresentation
 
     readonly property var urls: Plasmoid.configuration.icsUrls.split(/\s+/).filter(u => /^(https?|webcal):\/\//.test(u))
+    readonly property var sysCal: Plasmoid.systemCalendar || null   // macOS host only
+    readonly property var sources: sysCal ? ["system"] : urls
     readonly property int days: Math.max(1, Plasmoid.configuration.days)
     readonly property var palette: ["#0a84ff", "#30d158", "#ff9f0a", "#bf5af2", "#ff375f", "#64d2ff"]
     readonly property color dim: Qt.rgba(1, 1, 1, 0.55)
 
     property var perCalendar: ({})  // url -> occurrences within the cache window
     property var failed: ({})       // url -> true
-    readonly property bool anyFailed: urls.some(u => failed[u])
+    readonly property bool anyFailed: sources.some(u => failed[u])
     property real updated: 0
     property real clock: Date.now()
 
@@ -56,6 +59,17 @@ PlasmoidItem {
     }
 
     function fetchAll() {
+        if (sysCal) {
+            const from = dayStart(Date.now()), ev = sysCal.events(from, from + 32 * 86400e3);
+            failed = ev == null ? { system: true } : {};
+            if (ev != null) {
+                // a host list arrives as a sequence wrapper, not an Array: concat() wouldn't spread it
+                perCalendar = { system: Array.from(ev, e => Object.assign({}, e)) };
+                updated = Date.now();
+                save();
+            }
+            return;
+        }
         urls.forEach((url, i) => {
             const x = new XMLHttpRequest();
             x.onreadystatechange = function () {
@@ -90,7 +104,7 @@ PlasmoidItem {
     readonly property var rows: {
         const from = dayStart(clock), to = from + days * 86400e3, out = [];
         let all = [];
-        urls.forEach(u => { if (perCalendar[u]) all = all.concat(perCalendar[u]); });
+        sources.forEach(u => { if (perCalendar[u]) all = all.concat(perCalendar[u]); });
         all = all.filter(e => e.end > clock && e.t < to)
                  .sort((a, b) => (a.allDay === b.allDay ? 0 : a.allDay ? -1 : 1) || a.t - b.t);
         for (let d = from; d < to; d += 86400e3) {
@@ -168,6 +182,12 @@ PlasmoidItem {
         failed = f;
         perCalendar = p;
         fetchAll();
+    }
+
+    Connections {
+        target: root.sysCal
+        ignoreUnknownSignals: true
+        function onChanged() { root.fetchAll(); }
     }
 
     Timer {
@@ -277,7 +297,8 @@ PlasmoidItem {
                         anchors.top: parent.top
                         anchors.bottom: parent.bottom
                         anchors.margins: 5
-                        color: row.modelData.holiday ? Qt.rgba(1, 1, 1, 0.35) : root.palette[(row.modelData.calendar || 0) % root.palette.length]
+                        color: row.modelData.holiday ? Qt.rgba(1, 1, 1, 0.35)
+                             : row.modelData.color || root.palette[(row.modelData.calendar || 0) % root.palette.length]
                     }
                     Column {
                         visible: !row.modelData.header
@@ -330,13 +351,15 @@ PlasmoidItem {
                     Layout.fillWidth: true
                     horizontalAlignment: Text.AlignHCenter
                     wrapMode: Text.WordWrap
-                    text: root.urls.length ? "Событий на " + root.days + " " + (root.days === 1 ? "день" : root.days < 5 ? "дня" : "дней") + " нет"
-                                           : "Добавьте ссылку на календарь (iCal) — Google, Яндекс или Nextcloud"
+                    text: root.sysCal && root.sysCal.access !== "granted"
+                          ? "Нет доступа к календарям macOS — разрешите его в Системных настройках"
+                          : root.sources.length ? "Событий на " + root.days + " " + (root.days === 1 ? "день" : root.days < 5 ? "дня" : "дней") + " нет"
+                          : "Добавьте ссылку на календарь (iCal) — Google, Яндекс или Nextcloud"
                     font.pixelSize: 12
                     color: root.dim
                 }
                 Rectangle {
-                    visible: root.urls.length === 0
+                    visible: root.sysCal ? root.sysCal.access !== "granted" : root.urls.length === 0
                     Layout.alignment: Qt.AlignHCenter
                     implicitWidth: btn.implicitWidth + 24
                     implicitHeight: 26
@@ -346,7 +369,7 @@ PlasmoidItem {
                     Text {
                         id: btn
                         anchors.centerIn: parent
-                        text: "Настроить"
+                        text: root.sysCal ? "Открыть настройки" : "Настроить"
                         font.pixelSize: 12
                         color: "white"
                     }
