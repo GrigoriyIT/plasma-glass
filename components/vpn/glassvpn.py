@@ -86,10 +86,13 @@ RULESET_URL = {
     "geoip-ru": "https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/geoip-ru.srs",
 }
 RU_SUFFIXES = ["ru", "su", "xn--p1ai", "xn--p1acf", "xn--d1acj3b"]  # .рф .рус .дети
-# "Only through the VPN" by default: Anthropic refuses requests from Russian IPs,
-# so Claude must never fall back to the direct route
+# "Only through the VPN" by default: Anthropic and OpenAI refuse requests from Russian
+# IPs (checked: 403 unsupported_country / "Request not allowed"), so their apps and
+# sites must never fall back to the direct route
 CLAUDE_DESKTOP = "Claude.app" if sys.platform == "darwin" else "/usr/lib/claude-desktop/"
-DEFAULT_VPN_ONLY = ["claude", CLAUDE_DESKTOP, "anthropic.com", "claude.ai", "claude.com"]
+CHATGPT_DESKTOP = "ChatGPT.app" if sys.platform == "darwin" else "/usr/lib/chatgpt/"
+DEFAULT_VPN_ONLY = ["claude", CLAUDE_DESKTOP, CHATGPT_DESKTOP, "codex", "anthropic.com", "claude.ai", "claude.com",
+                    "openai.com", "chatgpt.com"]
 PRIVATE_NETS = ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16",
                 "100.64.0.0/10", "fc00::/7", "fe80::/10"]
 
