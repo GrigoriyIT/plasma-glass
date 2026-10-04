@@ -71,9 +71,17 @@ original.
      popups.
 3. **Popup shadow** (`dialogs/background.svgz`): solid shadow pieces `path962` and `rect986` (`opacity:0.55;fill:#2a2a2a`) → `opacity:0`. They drew a hard dark square outside every popup's rounded frame; the soft gradient shadow stays.
 4. **Tooltips** (`widgets/tooltip.svgz`): `opacity:0.55;fill:#ffffff` → `opacity:0.2;fill:#ffffff`.
+5. **Kvantum menus** (`~/.config/Kvantum/mac-tahoe-liquid-kdeDark/mac-tahoe-liquid-kdeDark.svg`):
+   with `menu_shadow_depth=4` the menu edge is drawn by `menu-shadow-*`, and every
+   side and corner reuses `menu-shadow-top` and `menu-shadow-topright`. Their white
+   1 px line inside the black outline — `path3581` and the corner arc
+   `d="m 109,507 v 1 a 7.9999555…"` — `opacity:0.1` → `opacity:0.4`. On the
+   translucent menu that gives the same brightness as the window hairline
+   (≈ 90 on a 45 fill, the window gives 91 on 51).
 
 After an Aurorae change, switch the decoration to Breeze and back; after a Plasma
 theme change, delete `~/.cache/plasma_theme_*.kcache` and restart plasmashell.
+Kvantum changes apply to applications started afterwards.
 
 ## Top bar
 
