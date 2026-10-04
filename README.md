@@ -64,7 +64,7 @@ KWin upgrade.
 
 | Path | What it does |
 |---|---|
-| [`components/glass-effect`](components/glass-effect) | Patch for the MacTahoe *liquidglass* KWin effect: crisp glass edges, glass shaped to the popup's blur region, full-strength glass under inactive windows |
+| [`components/glass-effect`](components/glass-effect) | Patch for the MacTahoe *liquidglass* KWin effect: crisp glass edges, glass shaped to the popup's blur region and rounded like its frame, full-strength glass under inactive windows |
 | [`components/corner-radius`](components/corner-radius) | Rewrites corner arcs in Aurorae / Plasma theme SVGs |
 | [`components/icons`](components/icons) | *Plasma Glass* icon theme (Breeze Dark + Colloid apps + launcher tile) |
 | [`components/launcher`](components/launcher) | MacTahoe launcher QML with a left category column |

@@ -35,8 +35,8 @@ cd ~/src/Colloid-icon-theme && ./install.sh -s default -t default
 ## 2. Glass effect patch
 
 Makes glass edges crisp (no light rim on translucent popups), shapes the glass
-to the popup's blur region, and keeps full-strength glass under inactive
-windows.
+to the popup's blur region, rounds Plasma popups and KRunner at the radius of
+their frame, and keeps full-strength glass under inactive windows.
 
 ```bash
 cd ~/src/macos-tahoe-liquid-kde/src/offline/kwin-effects/acrylic-glass
@@ -154,13 +154,14 @@ Make it free-floating (full frame) and pin it just below the panel:
 kwriteconfig6 --file krunnerrc --group General --key FreeFloating true
 kpackagetool6 --type KWin/Script -i components/krunner-top/krunnertop
 kwriteconfig6 --file kwinrc --group Plugins --key krunnertopEnabled true
-kwriteconfig6 --file kwinrc --group Effect-liquidglass --key WindowClasses krunner
 kwriteconfig6 --file kwinrc --group Round-Corners --key Exclusions "plasmashell,org.kde.plasmashell,krunner,org.kde.krunner"
 qdbus6 org.kde.KWin /KWin reconfigure
 ```
 
-KRunner is excluded from the glass effect: its glass comes out ~2 px larger than its
-frame and doubles the corner line.
+KRunner gets the same glass as Plasma popups; the glass patch (step 2) matches its
+corners to the frame. Without the patch, add
+`kwriteconfig6 --file kwinrc --group Effect-liquidglass --key WindowClasses krunner`
+to leave KRunner without glass, otherwise its corners show a light wedge.
 
 ## 11. Chrome font-cache fix
 

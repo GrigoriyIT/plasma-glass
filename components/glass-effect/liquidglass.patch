@@ -1,6 +1,22 @@
+diff --git a/src/effect.cpp b/src/effect.cpp
+index 03a4cb8..e3631c8 100644
 --- a/src/effect.cpp
 +++ b/src/effect.cpp
-@@ -1238,7 +1238,11 @@
+@@ -64,6 +64,13 @@ static void ensureResources()
+ 
+ namespace KWin {
+ 
++static bool isPlasmaSurface(const KWin::EffectWindow* w)
++{
++    const QString cls = w->window()->resourceClass();
++    return cls == QStringLiteral("plasmashell") || cls == QStringLiteral("org.kde.plasmashell")
++        || cls == QStringLiteral("krunner") || cls == QStringLiteral("org.kde.krunner");
++}
++
+ #if ACRYLIC_GLASS_KWIN_6_7
+ /// 6.7 removed the global scaledRect() helper (it lived in
+ /// effect/globals.h pre-6.7). Re-provide it verbatim so the three call
+@@ -1238,7 +1245,11 @@ void BlurEffect::blur(
      // Maximized full-screen apps keep sharp corners unless the user
      // opts in via RoundCornersOfMaximizedWindows.
      const QMatrix4x4& colorMatrix = m_colorMatrix;
@@ -13,7 +29,22 @@
  
      BorderRadius cornerRadius = w->window()->borderRadius();
      float topCornerRadius = 0.0;
-@@ -1307,12 +1311,18 @@
+@@ -1252,6 +1263,14 @@ void BlurEffect::blur(
+         topCornerRadius = BlurConfig::popupCornerRadius();
+         bottomCornerRadius = BlurConfig::popupCornerRadius();
+ 
++    } else if (!w->decoration() && isPlasmaSurface(w)) {
++        // Plasma's own popups, notifications and KRunner are normal windows
++        // without a decoration whose frame comes from the theme's
++        // dialogs/background; match its arc instead of the window radius,
++        // or the glass rim cuts across the corner and leaves a light wedge.
++        topCornerRadius = BlurConfig::plasmaCornerRadius();
++        bottomCornerRadius = BlurConfig::plasmaCornerRadius();
++
+     } else {
+         // A window is "maximized" when its frame fills the maximize area of
+         // its own screen / desktop — checked live each frame (no cached
+@@ -1307,12 +1326,18 @@ void BlurEffect::blur(
  
      const QVector2D halfpixel(0.5 / read->colorAttachment()->width(), 0.5 / read->colorAttachment()->height());
  
@@ -38,9 +69,25 @@
      // Floor to integer device pixels so the SDF rounded corners are always
      // pixel-aligned — prevents subpixel border artifacts that shift with
      // window position.
+diff --git a/src/glass.kcfg b/src/glass.kcfg
+index 8296a3c..a7d5aa5 100644
+--- a/src/glass.kcfg
++++ b/src/glass.kcfg
+@@ -50,6 +50,9 @@ xembedsniproxy</default>
+         <entry name="PopupCornerRadius" type="Double">
+             <default>6.0</default>
+         </entry>
++        <entry name="PlasmaCornerRadius" type="Double">
++            <default>18.0</default>
++        </entry>
+         <entry name="RoundCornersOfMaximizedWindows" type="Bool">
+             <default>false</default>
+         </entry>
+diff --git a/src/shaders/glass.glsl b/src/shaders/glass.glsl
+index 3b8cf50..a4a2122 100644
 --- a/src/shaders/glass.glsl
 +++ b/src/shaders/glass.glsl
-@@ -68,6 +68,6 @@
+@@ -68,6 +68,6 @@ void main(void)
          col = lgApplyHighlight(col, inside, outNorm, highlightWidth, highlightStrength);
      }
  
@@ -48,9 +95,11 @@
 +    float mask = 1.0 - smoothstep(-1.0, 0.0, d); // crisp edge: a 3px fade let the unblurred backdrop show as a light rim
      LG_OUT = vec4(col, mask) * colorMatrix * opacity;
  }
+diff --git a/src/shaders/glass_core.glsl b/src/shaders/glass_core.glsl
+index 80c67f1..bc86b1f 100644
 --- a/src/shaders/glass_core.glsl
 +++ b/src/shaders/glass_core.glsl
-@@ -69,6 +69,6 @@
+@@ -69,6 +69,6 @@ void main()
          col = lgApplyHighlight(col, inside, outNorm, highlightWidth, highlightStrength);
      }
  

@@ -13,6 +13,7 @@ edge at slightly different radii, the corner looks doubled or shows a light gap.
 | Glass effect | `WindowCornerRadius`, `BottomCornerRadius`, `DialogCornerRadius`, `PopupCornerRadius` | 11 |
 | Glass effect | `DockCornerRadius` | 16 (matches the dock SVG) |
 | Glass effect | `MenuCornerRadius` | 9 (Kvantum menus) |
+| Glass effect (patched) | `PlasmaCornerRadius` | 18 — Plasma popups, notifications and KRunner |
 | Glass effect | `TooltipCornerRadius` | 11 |
 | Rounded Corners | `Size`, `InactiveCornerRadius` | 11 |
 | Rounded Corners | `OutlineThickness`, `InactiveOutlineThickness` | 1 |
@@ -21,9 +22,14 @@ edge at slightly different radii, the corner looks doubled or shows a light gap.
 | Rounded Corners | `Exclusions` | `plasmashell,org.kde.plasmashell,krunner,org.kde.krunner` |
 | Aurorae decoration | top corner arcs | 3 px (clipping is left to Rounded Corners) |
 
-Why 11 and not smaller: Plasma applet popups (battery, calendar…) use the theme's
-dialog background, whose corners are 11 px. Shrinking that SVG breaks its frame
-tiles, so everything else is set to 11 instead.
+Plasma's own surfaces (applet popups such as the calendar, notifications, KRunner)
+draw their frame from the theme's `dialogs/background.svgz`. Its corner arc is
+drawn at 2× scale and measures about 18 px on screen, not 11. KWin reports these
+surfaces as ordinary undecorated windows, so the glass used to round them at the
+window radius: its light rim cut across the corner and left a light wedge
+between the rim and the frame. The glass patch gives undecorated `plasmashell`
+and `krunner` windows their own radius, `PlasmaCornerRadius`. Shrinking the SVG
+instead breaks its frame tiles.
 
 ## Glass
 
