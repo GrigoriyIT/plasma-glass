@@ -88,7 +88,8 @@ RULESET_URL = {
 RU_SUFFIXES = ["ru", "su", "xn--p1ai", "xn--p1acf", "xn--d1acj3b"]  # .рф .рус .дети
 # "Only through the VPN" by default: Anthropic refuses requests from Russian IPs,
 # so Claude must never fall back to the direct route
-DEFAULT_VPN_ONLY = ["claude", "Claude.app", "anthropic.com", "claude.ai", "claude.com"]
+CLAUDE_DESKTOP = "Claude.app" if sys.platform == "darwin" else "/usr/lib/claude-desktop/"
+DEFAULT_VPN_ONLY = ["claude", CLAUDE_DESKTOP, "anthropic.com", "claude.ai", "claude.com"]
 PRIVATE_NETS = ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16",
                 "100.64.0.0/10", "fc00::/7", "fe80::/10"]
 
@@ -564,6 +565,371 @@ def mac_hide_dock_icon():
 
 # ------------------------------------------------------------------ tray --
 
+# ------------------------------------------------------- app rules window --
+
+KNOWN_NAMES = {"claude": "Claude Code"}   # command-line tools without an app bundle or icon
+LINUX_APP_DIRS = ["/usr/share/applications", "/usr/local/share/applications",
+                  str(Path.home() / ".local/share/applications")]
+MAC_APP_DIRS = ["/Applications", "/Applications/Utilities", str(Path.home() / "Applications"),
+                "/System/Applications", "/System/Applications/Utilities"]
+
+
+def normalize_domain(text):
+    """"https://www.claude.ai/chat" -> "claude.ai"; None if it isn't a domain."""
+    t = text.strip().lower()
+    if "://" not in t:
+        t = "//" + t
+    host = (urllib.parse.urlsplit(t).hostname or "").removeprefix("www.")
+    if not re.fullmatch(r"[a-z0-9а-яё-]+(\.[a-z0-9а-яё-]+)+", host):
+        return None
+    try:
+        return host.encode("idna").decode()   # кто-то.рф -> xn--...: what the TLS name looks like
+    except UnicodeError:
+        return None
+
+
+def show_domain(d):
+    try:
+        return d.encode().decode("idna")
+    except UnicodeError:
+        return d
+
+
+SHARED_BIN_DIRS = ("/usr/bin", "/bin", "/usr/local/bin", "/usr/sbin", "/sbin", "/usr/games",
+                   str(Path.home() / ".local/bin"))
+LAUNCHERS = {"pkexec", "xdg-open", "env", "sh", "bash", "python3", "sudo", "gksu"}
+
+
+def has_elf(d):
+    try:
+        for f in os.scandir(d):
+            if f.is_file() and os.access(f.path, os.X_OK):
+                with open(f.path, "rb") as fh:
+                    if fh.read(4) == b"\x7fELF":
+                        return True
+    except OSError:
+        pass
+    return False
+
+
+def linux_entry_for_exec(exec_line):
+    """Desktop-file Exec -> list entry. An app with its own directory (Chrome, Electron
+    apps, LibreOffice) -> that directory, so its helper processes match too; a program
+    in a shared bin directory -> its process name; launchers that hide the real
+    program (pkexec, xdg-open, scripts in ~/.local/bin) -> None."""
+    import shlex
+    import shutil
+    try:
+        args = [a for a in shlex.split(exec_line) if not a.startswith("%")]
+    except ValueError:
+        return None
+    while args and (args[0] == "env" or "=" in args[0]):
+        args.pop(0)
+    if not args or os.path.basename(args[0]) == "flatpak":
+        return None     # sandboxed: its processes aren't visible by host path
+    real = os.path.realpath(shutil.which(args[0]) or args[0])
+    try:
+        with open(real, "rb") as f:
+            script = f.read(2) == b"#!"
+    except OSError:
+        return None
+    d = os.path.dirname(real)
+    if d not in SHARED_BIN_DIRS:
+        return d + "/" if has_elf(d) else None
+    name = os.path.basename(real)
+    if name in LAUNCHERS or (script and d == SHARED_BIN_DIRS[-1]):
+        return None
+    return name
+
+
+def mac_app_name(path):
+    """The name Finder shows ("Калькулятор", not "Calculator")."""
+    try:
+        from Foundation import NSFileManager
+        return str(NSFileManager.defaultManager().displayNameAtPath_(str(path))).removesuffix(".app")
+    except ImportError:
+        return Path(path).stem
+
+
+def installed_apps():
+    """[(entry, name, icon, icon_name)] of the apps a user would pick from, sorted by name."""
+    from PyQt6.QtCore import QFileInfo
+    from PyQt6.QtWidgets import QFileIconProvider
+    apps = {}
+    if IS_MAC:
+        icons = QFileIconProvider()
+        for d in MAC_APP_DIRS:
+            for app in sorted(Path(d).glob("*.app")) + sorted(Path(d).glob("*/*.app")):
+                if app.name != "Glass VPN.app" and app.name not in apps:
+                    apps[app.name] = (mac_app_name(app), icons.icon(QFileInfo(str(app))), "")
+    else:
+        import configparser
+        for d in LINUX_APP_DIRS:
+            for f in sorted(Path(d).glob("*.desktop")):
+                cp = configparser.RawConfigParser(strict=False, interpolation=None)
+                try:
+                    cp.read(f, encoding="utf-8")
+                    e = cp["Desktop Entry"]
+                except (configparser.Error, KeyError, UnicodeDecodeError):
+                    continue
+                if e.get("Type") != "Application" or e.get("NoDisplay") == "true" or not e.get("Exec"):
+                    continue
+                entry = linux_entry_for_exec(e["Exec"])
+                if entry and entry not in apps and entry != "glassvpn":
+                    name = e.get("Name[ru]") or e.get("Name") or entry
+                    apps[entry] = (name, QIcon.fromTheme(e.get("Icon", "")), e.get("Icon", ""))
+    return sorted(((k, *v) for k, v in apps.items()), key=lambda a: a[1].lower())
+
+
+def entry_look(entry, labels, known=None):
+    """How a list entry is shown: (name, detail, icon). known: entry -> (name, icon)
+    of the installed apps, for entries added by hand or by default."""
+    from PyQt6.QtCore import QFileInfo
+    from PyQt6.QtWidgets import QFileIconProvider
+    if entry.endswith(".app"):
+        for d in MAC_APP_DIRS:
+            for p in [Path(d) / entry, *Path(d).glob(f"*/{entry}")]:
+                if p.exists():
+                    return mac_app_name(p), "приложение", QFileIconProvider().icon(QFileInfo(str(p)))
+        return entry[:-4], "приложение", QIcon.fromTheme("application-x-executable")
+    if "/" not in entry and "." in entry:
+        return show_domain(entry), "сайт и его поддомены", QIcon.fromTheme("applications-internet", draw_globe())
+    detail = "программа в " + entry if entry.endswith("/") else "программа " + entry
+    if known and entry in known and entry not in labels:
+        return known[entry][0], detail, known[entry][1]
+    label = labels.get(entry, {})
+    name = label.get("name") or KNOWN_NAMES.get(entry) or os.path.basename(entry.rstrip("/")) or entry
+    icon = QIcon.fromTheme(label.get("icon", "")) if label.get("icon") else QIcon.fromTheme("utilities-terminal")
+    return name, detail, icon
+
+
+def draw_globe():
+    pm = QPixmap(64, 64)
+    pm.fill(Qt.GlobalColor.transparent)
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.RenderHint.Antialiasing)
+    p.setPen(QPen(QColor("#4c9cff"), 4))
+    p.drawEllipse(QRectF(6, 6, 52, 52))
+    p.drawEllipse(QRectF(20, 6, 24, 52))
+    p.drawLine(QPointF(6, 32), QPointF(58, 32))
+    p.end()
+    return QIcon(pm)
+
+
+def bring_to_front():
+    """A menu bar app has no Dock icon; without this its windows open behind others."""
+    if IS_MAC:
+        try:
+            from AppKit import NSApplication
+            NSApplication.sharedApplication().activateIgnoringOtherApps_(True)
+        except ImportError:
+            pass
+
+
+class AppPicker:
+    """Pick installed apps (search, icons, multi-select) or any program file."""
+
+    def __init__(self, parent):
+        from PyQt6.QtWidgets import (QAbstractItemView, QDialog, QDialogButtonBox, QLabel, QLineEdit,
+                                     QListWidget, QListWidgetItem, QPushButton, QVBoxLayout)
+        self.dlg = d = QDialog(parent)
+        d.setWindowTitle("Выберите приложения")
+        d.resize(420, 520)
+        lay = QVBoxLayout(d)
+        hint = QLabel("Можно выбрать несколько — с " + ("⌘" if IS_MAC else "Ctrl") + " или Shift.")
+        hint.setWordWrap(True)
+        lay.addWidget(hint)
+        self.search = QLineEdit(placeholderText="Поиск")
+        self.search.setClearButtonEnabled(True)
+        lay.addWidget(self.search)
+        self.list = QListWidget()
+        self.list.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+        self.list.setIconSize(QPixmap(28, 28).size())
+        for entry, name, icon, icon_name in installed_apps():
+            it = QListWidgetItem(icon, name)
+            it.setData(Qt.ItemDataRole.UserRole, (entry, {"name": name, "icon": icon_name}))
+            self.list.addItem(it)
+        self.list.itemDoubleClicked.connect(lambda _: d.accept())
+        lay.addWidget(self.list)
+        other = QPushButton("Другая программа…")
+        other.clicked.connect(self.pick_file)
+        lay.addWidget(other)
+        bb = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        bb.button(QDialogButtonBox.StandardButton.Ok).setText("Добавить")
+        bb.button(QDialogButtonBox.StandardButton.Cancel).setText("Отмена")
+        bb.accepted.connect(d.accept)
+        bb.rejected.connect(d.reject)
+        lay.addWidget(bb)
+        self.search.textChanged.connect(self.filter)
+        self.picked = []
+
+    def filter(self, text):
+        t = text.strip().lower()
+        for i in range(self.list.count()):
+            it = self.list.item(i)
+            it.setHidden(bool(t) and t not in it.text().lower())
+
+    def pick_file(self):
+        from PyQt6.QtWidgets import QFileDialog
+        start = "/Applications" if IS_MAC else "/usr/bin"
+        path, _ = QFileDialog.getOpenFileName(self.dlg, "Программа", start)
+        if path:
+            self.picked = [(file_entry(path), None)]
+            self.dlg.accept()
+
+    def run(self):
+        """[(entry, label_or_None)], label = {"name", "icon"}"""
+        bring_to_front()
+        if self.dlg.exec() != self.dlg.DialogCode.Accepted:
+            return []
+        if self.picked:
+            return self.picked
+        return [it.data(Qt.ItemDataRole.UserRole) for it in self.list.selectedItems()]
+
+
+def file_entry(path):
+    """A dropped or chosen file -> list entry (an .app bundle anywhere in its path wins)."""
+    m = re.search(r"([^/]+\.app)(/|$)", path)
+    return m.group(1) if m else path
+
+
+class RulesDialog:
+    """The two lists side by side in tabs, edited with buttons and drag and drop."""
+    TABS = [("vpn_only", "Только через VPN",
+             "Эти приложения и сайты всегда идут через VPN — даже к российским сайтам. "
+             "Если сервер недоступен или VPN выключен, у них нет интернета, но с вашего "
+             "настоящего адреса они не выходят."),
+            ("direct_apps", "Всегда мимо VPN",
+             "Эти приложения и сайты всегда идут напрямую, даже когда VPN включён.")]
+
+    def __init__(self, settings, tab_key):
+        from PyQt6.QtWidgets import (QAbstractItemView, QDialog, QHBoxLayout, QLabel, QListWidget,
+                                     QPushButton, QTabWidget, QVBoxLayout, QWidget)
+        self.settings = settings
+        self.lists = {k: list(settings.get(k, [])) for k, _, _ in self.TABS}
+        self.labels = dict(settings.get("app_labels", {}))
+        self.known = {e: (n, i) for e, n, i, _ in installed_apps()}
+        self.dlg = d = QDialog()
+        d.setWindowTitle("Glass VPN — правила для приложений")
+        d.resize(520, 560)
+        lay = QVBoxLayout(d)
+        self.tabs = QTabWidget()
+        self.widgets = {}
+        for key, title, help_text in self.TABS:
+            page = QWidget()
+            pl = QVBoxLayout(page)
+            hint = QLabel(help_text + "\n\nМожно перетащить сюда приложение из Finder или файлового менеджера.")
+            hint.setWordWrap(True)
+            pl.addWidget(hint)
+            lw = DropList(lambda paths, k=key: self.add([(file_entry(p), None) for p in paths], k))
+            lw.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+            lw.setIconSize(QPixmap(28, 28).size())
+            pl.addWidget(lw)
+            row = QHBoxLayout()
+            for text, fn in (("Добавить приложение…", lambda _=False, k=key: self.add(AppPicker(d).run(), k)),
+                             ("Добавить сайт…", lambda _=False, k=key: self.add_site(k)),
+                             ("Удалить", lambda _=False, k=key: self.remove(k))):
+                b = QPushButton(text)
+                b.clicked.connect(fn)
+                row.addWidget(b)
+            row.addStretch()
+            pl.addLayout(row)
+            self.widgets[key] = lw
+            self.tabs.addTab(page, title)
+            self.refresh(key)
+        self.tabs.setCurrentIndex([k for k, _, _ in self.TABS].index(tab_key))
+        lay.addWidget(self.tabs)
+        done = QPushButton("Готово")
+        done.setDefault(True)
+        done.clicked.connect(d.accept)
+        r = QHBoxLayout()
+        r.addStretch()
+        r.addWidget(done)
+        lay.addLayout(r)
+
+    def refresh(self, key):
+        from PyQt6.QtWidgets import QListWidgetItem
+        lw = self.widgets[key]
+        lw.clear()
+        for entry in self.lists[key]:
+            name, detail, icon = entry_look(entry, self.labels, self.known)
+            it = QListWidgetItem(icon, f"{name}\n{detail}")
+            it.setData(Qt.ItemDataRole.UserRole, entry)
+            it.setToolTip(entry)
+            lw.addItem(it)
+        title = dict((k, t) for k, t, _ in self.TABS)[key]
+        self.tabs.setTabText([k for k, _, _ in self.TABS].index(key),
+                             f"{title} ({len(self.lists[key])})" if self.lists[key] else title)
+
+    def add(self, picked, key):
+        other = "direct_apps" if key == "vpn_only" else "vpn_only"
+        for entry, label in picked:
+            if not entry:
+                continue
+            if label and not entry.endswith(".app"):     # bundles show their own name and icon
+                self.labels[entry] = label
+            if entry in self.lists[other]:       # an app can only be on one list
+                self.lists[other].remove(entry)
+                self.refresh(other)
+            if entry not in self.lists[key]:
+                self.lists[key].append(entry)
+        self.refresh(key)
+
+    def add_site(self, key):
+        text, ok = QInputDialog.getText(self.dlg, "Добавить сайт",
+                                        "Адрес сайта, например claude.ai (поддомены тоже попадут под правило):")
+        if not ok or not text.strip():
+            return
+        dom = normalize_domain(text)
+        if not dom:
+            QMessageBox.warning(self.dlg, "Glass VPN", f"«{text.strip()}» не похоже на адрес сайта.")
+            return
+        self.add([(dom, None)], key)
+
+    def remove(self, key):
+        lw = self.widgets[key]
+        gone = {it.data(Qt.ItemDataRole.UserRole) for it in lw.selectedItems()}
+        if not gone and lw.currentItem():
+            gone = {lw.currentItem().data(Qt.ItemDataRole.UserRole)}
+        self.lists[key] = [e for e in self.lists[key] if e not in gone]
+        self.refresh(key)
+
+    def run(self):
+        """True if the lists changed (they are written into settings)."""
+        bring_to_front()
+        self.dlg.exec()
+        changed = any(self.lists[k] != self.settings.get(k, []) for k in self.lists)
+        used = set(self.lists["vpn_only"]) | set(self.lists["direct_apps"])
+        self.settings["app_labels"] = {k: v for k, v in self.labels.items() if k in used}
+        for k, v in self.lists.items():
+            self.settings[k] = v
+        return changed
+
+
+def DropList(on_drop):
+    """A QListWidget that takes files dropped from Finder / a file manager."""
+    from PyQt6.QtWidgets import QListWidget
+
+    class _DropList(QListWidget):
+        def __init__(self):
+            super().__init__()
+            self.setAcceptDrops(True)
+            self.setDragDropMode(self.DragDropMode.DropOnly)
+
+        def dragEnterEvent(self, e):
+            if e.mimeData().hasUrls():
+                e.acceptProposedAction()
+
+        dragMoveEvent = dragEnterEvent
+
+        def dropEvent(self, e):
+            paths = [u.toLocalFile() for u in e.mimeData().urls() if u.isLocalFile()]
+            if paths:
+                on_drop(paths)
+                e.acceptProposedAction()
+    return _DropList()
+
+
 class Signals(QObject):
     servers_changed = pyqtSignal()
     message = pyqtSignal(str, str)
@@ -595,6 +961,9 @@ class Tray:
         self.settings = load(SETTINGS, {"subscriptions": [], "selected": None, "autoconnect": True})
         self.settings.setdefault("fallback_direct", True)
         self.settings.setdefault("vpn_only", list(DEFAULT_VPN_ONLY))
+        if not IS_MAC and "Claude.app" in self.settings["vpn_only"]:   # the macOS default on Linux
+            self.settings["vpn_only"] = [CLAUDE_DESKTOP if e == "Claude.app" else e
+                                         for e in self.settings["vpn_only"]]
         self.settings.setdefault("direct_apps", [])
         self.guard = False                # sing-box up with the VPN off, blocking the VPN-only list
         self.servers = load(SERVERS, [])
@@ -775,11 +1144,7 @@ class Tray:
 
         m.addSeparator()
         self.build_sources_menu(m.addMenu("Подписки и ключи"))
-        rm = m.addMenu("Правила для приложений")
-        rm.addAction(f"Только через VPN ({len(self.settings.get('vpn_only', []))})…").triggered.connect(
-            lambda: self.edit_list("vpn_only"))
-        rm.addAction(f"Всегда мимо VPN ({len(self.settings.get('direct_apps', []))})…").triggered.connect(
-            lambda: self.edit_list("direct_apps"))
+        m.addAction("Правила для приложений…").triggered.connect(lambda: self.edit_rules("vpn_only"))
         fd = m.addAction("Напрямую, если сервер недоступен")
         fd.setCheckable(True)
         fd.setChecked(self.settings.get("fallback_direct", True))
@@ -795,22 +1160,12 @@ class Tray:
         m.addAction("Выход").triggered.connect(self.quit)
         self.refresh_icon()
 
-    LIST_PROMPT = {
-        "vpn_only": "Только через VPN — никогда напрямую: если сервер недоступен или VPN выключен,\n"
-                    "у них просто нет сети. Даже российские сайты они открывают через VPN.",
-        "direct_apps": "Всегда мимо VPN — напрямую, даже когда VPN включён.",
-    }
-
-    def edit_list(self, key):
-        text, ok = QInputDialog.getMultiLineText(
-            None, "Glass VPN", self.LIST_PROMPT[key] + "\n\nПо одному в строке: имя процесса (claude), "
-            "приложение (Telegram.app), путь (/usr/bin/curl) или домен (claude.ai):",
-            "\n".join(self.settings.get(key, [])))
-        if not ok:
-            return
-        self.settings[key] = [l.strip() for l in text.splitlines() if l.strip()]
-        save(SETTINGS, self.settings)
-        self.apply_rules()
+    def edit_rules(self, tab):
+        if RulesDialog(self.settings, tab).run():
+            save(SETTINGS, self.settings)
+            self.apply_rules()
+        else:
+            save(SETTINGS, self.settings)    # labels only
 
     def apply_rules(self):
         """New lists take effect: rebuild sing-box in whatever mode it is in."""
