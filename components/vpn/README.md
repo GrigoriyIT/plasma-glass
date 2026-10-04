@@ -92,6 +92,12 @@ Xray in-process ([AndroidLibXrayLite](https://github.com/2dust/AndroidLibXrayLit
   secret path, only while the dialog is open) and pastes the subscription there. Settings and checks
   that Android TV lacks are hidden; always-on is set once with
   `adb shell settings put secure always_on_vpn_app local.glassvpn`.
+- Android TV 9: after a long standby some TVs (Xiaomi Mi TV) drop Wi-Fi on wake and the system
+  finds it again only after minutes; for 4 minutes after the screen comes on, while there is no
+  network, the app asks Wi-Fi for a full rescan every 10 s.
+- Android TV with little memory: user-installed apps are closed 5 minutes after they leave the
+  screen, and all of them 30 s into standby (what plays in the background is spared). Opt-in, as it
+  needs usage access: `adb shell appops set local.glassvpn GET_USAGE_STATS allow`.
 - Keeps itself running: a sticky foreground service that comes back if the system kills it, and a
   watchdog that restarts Xray (re-resolving the server) when it stops or the server has been silent
   for 30 s, backing off up to 5 min.

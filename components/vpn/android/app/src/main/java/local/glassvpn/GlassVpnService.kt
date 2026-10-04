@@ -4,8 +4,10 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.ServiceInfo
 import android.net.ConnectivityManager
 import android.net.LinkProperties
@@ -13,6 +15,7 @@ import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
 import android.net.VpnService
+import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.ParcelFileDescriptor
 import android.os.PowerManager
@@ -70,6 +73,7 @@ class GlassVpnService : VpnService() {
         private const val WATCHDOG_MIN = 30_000_000_000L    // ns
         private const val WATCHDOG_MAX = 300_000_000_000L
         private const val FALLBACK_DNS = "77.88.8.8"   // Yandex: answers for Russian names
+        private const val KICK_FOR = 240_000_000_000L      // ns of Wi-Fi rescans after the screen comes on
 
         val status = MutableStateFlow(VpnStatus())
         /** Current SOCKS credentials, for fetching subscriptions through the tunnel. */
@@ -116,6 +120,27 @@ class GlassVpnService : VpnService() {
         override fun onLost(network: Network) = onNetworksChanged()
     }
 
+    // Android TV 9 (Xiaomi Mi TV) after a long standby: on wake the driver resets the
+    // regulatory domain and drops Wi-Fi, then the system rescans at 30/40/80 s and misses the
+    // network for minutes. reconnect() there runs a full-band connectivity scan right away.
+    private val isTvDevice by lazy { isTv(this) }
+    @Volatile private var lastNotified: VpnStatus? = null
+    private val wifiKick by lazy { Build.VERSION.SDK_INT < 29 && isTvDevice }
+    @Volatile private var kickUntil = 0L
+    private var kicker: ScheduledFuture<*>? = null
+    private val tidy by lazy { AppTidy(this) }
+    private val screen = object : BroadcastReceiver() {
+        override fun onReceive(ctx: Context, intent: Intent) {
+            if (intent.action == Intent.ACTION_SCREEN_OFF) {   // standby: close the apps once they stop
+                timer.schedule({ if (!isInteractive()) tidyApps(all = true) }, 30, TimeUnit.SECONDS)
+                return
+            }
+            if (!wifiKick) return
+            kickUntil = System.nanoTime() + KICK_FOR
+            if (kicker == null) kicker = timer.scheduleWithFixedDelay({ kickWifi() }, 3, 10, TimeUnit.SECONDS)
+        }
+    }
+
     override fun onCreate() {
         super.onCreate()
         getSystemService(NotificationManager::class.java).createNotificationChannel(
@@ -124,6 +149,10 @@ class GlassVpnService : VpnService() {
             .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
             .addCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)
             .build(), netCallback)
+        if (isTvDevice) {
+            registerReceiver(screen, IntentFilter(Intent.ACTION_SCREEN_ON).apply { addAction(Intent.ACTION_SCREEN_OFF) })
+            timer.scheduleWithFixedDelay({ if (isInteractive()) tidyApps(all = false) }, 1, 1, TimeUnit.MINUTES)
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -155,6 +184,7 @@ class GlassVpnService : VpnService() {
 
     override fun onDestroy() {
         cm.unregisterNetworkCallback(netCallback)
+        if (isTvDevice) unregisterReceiver(screen)
         worker.execute { teardown() }
         worker.shutdown()
         worker.awaitTermination(3, TimeUnit.SECONDS)
@@ -377,9 +407,14 @@ class GlassVpnService : VpnService() {
 
     private fun publish(st: VpnStatus) {
         status.value = st
-        if (st.state != VpnState.OFF) {
-            getSystemService(NotificationManager::class.java).notify(NOTIFY_ID, notification(st))
+        if (st.state == VpnState.OFF) { lastNotified = null; return }
+        // a TV shows no notification shade: re-post only when the state changes, not the speed
+        if (isTvDevice) {
+            val key = st.copy(down = 0, up = 0, latency = null)
+            if (key == lastNotified) return
+            lastNotified = key
         }
+        getSystemService(NotificationManager::class.java).notify(NOTIFY_ID, notification(st))
     }
 
     private fun notification(st: VpnStatus): Notification {
@@ -409,6 +444,29 @@ class GlassVpnService : VpnService() {
             .apply { if (Build.VERSION.SDK_INT >= 31) setForegroundServiceBehavior(Notification.FOREGROUND_SERVICE_IMMEDIATE) }
             .build()
     }
+
+    /** For a few minutes after the screen comes on: while there is no network, scan for it. */
+    @Suppress("DEPRECATION")
+    private fun kickWifi() {
+        if (System.nanoTime() > kickUntil) {
+            kicker?.cancel(false)
+            kicker = null
+            return
+        }
+        if (bestPhysical() != null) return
+        val wifi = applicationContext.getSystemService(WifiManager::class.java) ?: return
+        if (!wifi.isWifiEnabled) return
+        Log.i(TAG, "no network after wake: Wi-Fi rescan")
+        wifi.reconnect()
+    }
+
+    private fun tidyApps(all: Boolean) = try {
+        tidy.run(all)
+    } catch (e: Exception) {   // the timer must survive anything a vendor system throws here
+        Log.e(TAG, "tidy", e)
+    }
+
+    private fun isInteractive() = getSystemService(PowerManager::class.java).isInteractive
 
     // --------------------------------------------------------------- helpers --
 
