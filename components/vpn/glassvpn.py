@@ -293,7 +293,7 @@ def build_config(server, direct_hosts, local_dns=None, vpn_only=(), direct_apps=
             ],
             "rule_set": [
                 {"type": "remote", "tag": tag, "format": "binary", "url": url,
-                 "download_detour": "direct", "update_interval": "7d"}
+                 "http_client": {"detour": "direct"}, "update_interval": "7d"}
                 for tag, url in RULESET_URL.items()
             ],
             "final": "direct" if guard else "proxy",
