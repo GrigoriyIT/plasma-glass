@@ -107,6 +107,16 @@ PlasmoidItem {
         sources.forEach(u => { if (perCalendar[u]) all = all.concat(perCalendar[u]); });
         all = all.filter(e => e.end > clock && e.t < to)
                  .sort((a, b) => (a.allDay === b.allDay ? 0 : a.allDay ? -1 : 1) || a.t - b.t);
+        // the same event from two calendars (a holiday in two holiday calendars, a meeting
+        // in a shared and a personal one) is listed once; a copy with a place wins
+        const key = e => [String(e.summary || "").trim().toLowerCase(), e.t, e.end, !!e.allDay].join("|");
+        const best = {};
+        all.forEach((e, i) => {
+            const j = best[key(e)];
+            if (j === undefined || (!all[j].location && e.location))
+                best[key(e)] = i;
+        });
+        all = all.filter((e, i) => best[key(e)] === i);
         for (let d = from; d < to; d += 86400e3) {
             const date = new Date(d);
             const next = new Date(date.getFullYear(), date.getMonth(), date.getDate() + 1).getTime();
