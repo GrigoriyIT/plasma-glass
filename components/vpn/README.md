@@ -116,3 +116,34 @@ Xray in-process ([AndroidLibXrayLite](https://github.com/2dust/AndroidLibXrayLit
 A release key goes in `keystore.properties` (not committed): `storeFile`, `storePassword`,
 `keyAlias`, `keyPassword`. Without it the release APK is unsigned; `assembleDebug` signs with the
 debug key.
+
+## Windows (in progress)
+
+A native client, not a port of `glassvpn.py`: a Windows service does the work, a tray app (WinUI 3,
+next step) only shows and controls it.
+
+- **Service** `GlassVPN` (.NET 10, self-contained and trimmed, runs as LocalSystem, starts at boot,
+  restarts itself after a crash): runs sing-box (wintun TUN, `strict_route`) and Xray under a Job
+  Object, so the cores die with it — no orphaned tunnel. Same routing as the other clients:
+  Russian sites and the LAN direct, the rest through the server, the "only through the VPN" list
+  never direct (blocked while the VPN is off), traffic direct while the server is unreachable.
+- Reacts to system events instead of polling: resume from sleep (fresh Xray after 5 s) and address
+  changes (fresh Xray; a full reconnect when the network's DNS server changed).
+- Xray's local SOCKS ports are random and password-protected for each connection.
+- Russian rule sets are kept as local files and refreshed weekly by the service, so sing-box
+  starts without the network.
+- Settings and keys in `%ProgramData%\GlassVPN` (SYSTEM and Administrators only), sealed with DPAPI;
+  logs in `%ProgramData%\GlassVPN\logs`, 1 MB each with one old copy (the cores log through the service).
+- Control: a local named pipe `\\.\pipe\GlassVPN` (one JSON object per line), for the tray app
+  and for `glassvpnctl` (`status`, `connect`, `add <subscription or vless://>`, `servers`, `logs`…).
+
+Build on Windows with the .NET 10 SDK:
+
+```powershell
+cd components\vpn\windows
+powershell -ExecutionPolicy Bypass -File fetch-bins.ps1      # sing-box 1.14.2 + Xray 26.3.27, sha256-pinned
+powershell -ExecutionPolicy Bypass -File build.ps1           # -> .\out
+powershell -ExecutionPolicy Bypass -File install.ps1         # elevated; -Uninstall to remove
+glassvpnctl add https://your-subscription-url
+glassvpnctl connect
+```

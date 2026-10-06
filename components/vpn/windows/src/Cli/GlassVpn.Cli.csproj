@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <PublishTrimmed>true</PublishTrimmed>
+    <PublishReadyToRun>true</PublishReadyToRun>
+    <DebugType>none</DebugType>
+    <EnableCompressionInSingleFile>false</EnableCompressionInSingleFile>
+    <AssemblyName>glassvpnctl</AssemblyName>
+    <RootNamespace>GlassVpn.Cli</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Core\GlassVpn.Core.csproj" />
+  </ItemGroup>
+</Project>
