@@ -1,0 +1,148 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Window
+    x:Class="GlassVpn.App.RulesWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="using:GlassVpn.App"
+    Title="Правила Glass VPN">
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <Grid x:Name="TitleBar" Height="40" Padding="16,0" ColumnSpacing="10">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <Image x:Name="TitleIcon" Width="16" Height="16" VerticalAlignment="Center" />
+            <TextBlock Grid.Column="1" Text="Правила Glass VPN" VerticalAlignment="Center"
+                       Style="{StaticResource CaptionTextBlockStyle}" />
+        </Grid>
+
+        <Grid Grid.Row="1" Padding="24,4,24,20" RowSpacing="12">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <SelectorBar x:Name="Tabs" Margin="-12,0,0,0" SelectionChanged="Tabs_SelectionChanged">
+                <SelectorBarItem Text="Только через VPN" Tag="vpn_only" IsSelected="True" />
+                <SelectorBarItem Text="Всегда напрямую" Tag="direct_apps" />
+            </SelectorBar>
+
+            <TextBlock x:Name="Hint" Grid.Row="1" TextWrapping="Wrap"
+                       Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+
+            <Border Grid.Row="2" CornerRadius="8" BorderThickness="1"
+                    Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}">
+                <Grid>
+                    <ListView x:Name="List" SelectionMode="Extended" AllowDrop="True" Padding="0,4"
+                              DragOver="List_DragOver" Drop="List_Drop" KeyDown="List_KeyDown">
+                        <ListView.ItemTemplate>
+                            <DataTemplate x:DataType="local:RuleItem">
+                                <Grid ColumnSpacing="12" Padding="0,6" Background="Transparent">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <Grid Width="28" Height="28">
+                                        <Image Source="{x:Bind Icon, Mode=OneWay}" Width="28" Height="28" />
+                                        <FontIcon Glyph="{x:Bind Glyph}" FontSize="20"
+                                                  Visibility="{x:Bind GlyphVisibility, Mode=OneWay}"
+                                                  Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                    </Grid>
+                                    <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                        <TextBlock Text="{x:Bind Title}" TextTrimming="CharacterEllipsis" />
+                                        <TextBlock Text="{x:Bind Subtitle}" TextTrimming="CharacterEllipsis"
+                                                   Style="{StaticResource CaptionTextBlockStyle}"
+                                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                    </StackPanel>
+                                    <Button Grid.Column="2" Click="Remove_Click" Background="Transparent" BorderThickness="0"
+                                            Padding="8" ToolTipService.ToolTip="Убрать из списка">
+                                        <FontIcon Glyph="&#xE711;" FontSize="12" />
+                                    </Button>
+                                </Grid>
+                            </DataTemplate>
+                        </ListView.ItemTemplate>
+                    </ListView>
+                    <TextBlock x:Name="Empty" Visibility="Collapsed" TextWrapping="Wrap" TextAlignment="Center"
+                               VerticalAlignment="Center" Margin="32" IsHitTestVisible="False"
+                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                               Text="Список пуст. Добавьте программу или сайт — или перетащите сюда программу (.exe) или её ярлык." />
+                </Grid>
+            </Border>
+
+            <Grid Grid.Row="3" ColumnSpacing="8">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <Button Click="AddApp_Click">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <FontIcon Glyph="&#xECAA;" FontSize="14" />
+                        <TextBlock Text="Программа…" />
+                    </StackPanel>
+                </Button>
+                <Button Grid.Column="1" Click="AddFile_Click">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <FontIcon Glyph="&#xE8E5;" FontSize="14" />
+                        <TextBlock Text="Файл…" />
+                    </StackPanel>
+                </Button>
+                <TextBox x:Name="SiteBox" Grid.Column="2" PlaceholderText="Сайт, например claude.ai"
+                         KeyDown="SiteBox_KeyDown" />
+                <Button Grid.Column="3" Content="Добавить сайт" Style="{StaticResource AccentButtonStyle}"
+                        Click="AddSite_Click" />
+            </Grid>
+
+            <TextBlock x:Name="Footer" Grid.Row="4" Style="{StaticResource CaptionTextBlockStyle}"
+                       Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                       Text="Изменения применятся, когда вы закроете это окно." />
+        </Grid>
+
+        <!-- installed programs -->
+        <ContentDialog x:Name="Picker" Grid.RowSpan="2" Title="Программы" PrimaryButtonText="Добавить"
+                       CloseButtonText="Отмена" DefaultButton="Primary">
+            <Grid RowSpacing="10" Width="420" Height="420">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+                <TextBox x:Name="PickerFilter" PlaceholderText="Поиск" TextChanged="PickerFilter_TextChanged" />
+                <ListView x:Name="PickerList" Grid.Row="1" SelectionMode="Multiple">
+                    <ListView.ItemTemplate>
+                        <DataTemplate x:DataType="local:RuleItem">
+                            <Grid ColumnSpacing="12" Padding="0,4">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Grid Width="24" Height="24">
+                                    <Image Source="{x:Bind Icon, Mode=OneWay}" Width="24" Height="24" />
+                                    <FontIcon Glyph="{x:Bind Glyph}" FontSize="16"
+                                              Visibility="{x:Bind GlyphVisibility, Mode=OneWay}" />
+                                </Grid>
+                                <StackPanel Grid.Column="1">
+                                    <TextBlock Text="{x:Bind Title}" TextTrimming="CharacterEllipsis" />
+                                    <TextBlock Text="{x:Bind Subtitle}" Style="{StaticResource CaptionTextBlockStyle}"
+                                               TextTrimming="CharacterEllipsis"
+                                               Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                </StackPanel>
+                            </Grid>
+                        </DataTemplate>
+                    </ListView.ItemTemplate>
+                </ListView>
+            </Grid>
+        </ContentDialog>
+    </Grid>
+</Window>

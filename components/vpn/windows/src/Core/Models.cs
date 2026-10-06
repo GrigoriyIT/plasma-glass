@@ -51,7 +51,7 @@ public static class Defaults
     // so their apps and sites never fall back to the direct route
     public static readonly string[] VpnOnly =
     [
-        "claude.exe", "Claude.exe", "ChatGPT.exe", "codex.exe",
+        "claude.exe", "ChatGPT.exe", "codex.exe",          // matched case-insensitively
         "anthropic.com", "claude.ai", "claude.com", "claudeusercontent.com",
         "openai.com", "chatgpt.com", "oaistatic.com", "oaiusercontent.com",
         "githubcopilot.com", "copilot.microsoft.com", "x.ai", "grok.com",

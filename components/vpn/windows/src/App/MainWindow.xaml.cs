@@ -45,6 +45,7 @@ public sealed partial class MainWindow : Window
         InitializeComponent();
         hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
         SystemBackdrop = new DesktopAcrylicBackdrop();
+        App.ApplyTheme(this);
         AppWindow.Title = "Glass VPN";
         AppWindow.SetIcon(Path.Combine(AppContext.BaseDirectory, "Assets", "GlassVPN.ico"));
         AppWindow.IsShownInSwitchers = false;
@@ -121,13 +122,9 @@ public sealed partial class MainWindow : Window
             loading = true;
             AutoSwitch.IsOn = (bool?)st["autoconnect"] ?? true;
             FallbackSwitch.IsOn = (bool?)st["fallback_direct"] ?? true;
-            VpnOnlyBox.Text = Lines(st["vpn_only"]);
-            DirectBox.Text = Lines(st["direct_apps"]);
             loading = false;
         }
     }
-
-    static string Lines(JsonNode? n) => n is JsonArray a ? string.Join("\r", a.Select(x => (string?)x)) : "";
 
     void FillServers(JsonObject? sv)
     {
@@ -150,7 +147,7 @@ public sealed partial class MainWindow : Window
 
     void ShowPanel(FrameworkElement panel)
     {
-        foreach (var p in new FrameworkElement[] { ServersPanel, AddPanel, RulesPanel })
+        foreach (var p in new FrameworkElement[] { ServersPanel, AddPanel })
             p.Visibility = p == panel ? Visibility.Visible : Visibility.Collapsed;
     }
 
@@ -234,7 +231,7 @@ public sealed partial class MainWindow : Window
         AddBox.Focus(FocusState.Programmatic);
     }
 
-    void Rules_Click(object sender, RoutedEventArgs e) => ShowPanel(RulesPanel);
+    void Rules_Click(object sender, RoutedEventArgs e) => app.ShowRules();
 
     void Back_Click(object sender, RoutedEventArgs e) => ShowPanel(ServersPanel);
 
@@ -268,24 +265,6 @@ public sealed partial class MainWindow : Window
         else
             ShowInfo(InfoBarSeverity.Success, $"Подписки обновлены, серверов: {(int?)r!["servers"]}");
         await Reload();
-    }
-
-    async void RulesSave_Click(object sender, RoutedEventArgs e)
-    {
-        static JsonArray List(string text) =>
-            [.. text.Split('\r', '\n').Select(x => x.Trim()).Where(x => x.Length > 0).Select(x => (JsonNode)x)];
-        var r = await app.Actions.Call("set", new JsonObject
-        {
-            ["vpn_only"] = List(VpnOnlyBox.Text), ["direct_apps"] = List(DirectBox.Text),
-        }, timeoutSec: 60);
-        if (Error(r) is { } err)
-        {
-            ShowInfo(InfoBarSeverity.Error, err);
-            return;
-        }
-        ShowInfo(InfoBarSeverity.Success, "Правила сохранены");
-        ShowPanel(ServersPanel);
-        await app.Poll();
     }
 
     async void Auto_Toggled(object sender, RoutedEventArgs e)
