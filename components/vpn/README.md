@@ -117,10 +117,10 @@ A release key goes in `keystore.properties` (not committed): `storeFile`, `store
 `keyAlias`, `keyPassword`. Without it the release APK is unsigned; `assembleDebug` signs with the
 debug key.
 
-## Windows (in progress)
+## Windows
 
-A native client, not a port of `glassvpn.py`: a Windows service does the work, a tray app (WinUI 3,
-next step) only shows and controls it.
+A native client, not a port of `glassvpn.py`: a Windows service does the work, a tray app only
+shows and controls it.
 
 - **Service** `GlassVPN` (.NET 10, self-contained and trimmed, runs as LocalSystem, starts at boot,
   restarts itself after a crash): runs sing-box (wintun TUN, `strict_route`) and Xray under a Job
@@ -135,7 +135,14 @@ next step) only shows and controls it.
 - Settings and keys in `%ProgramData%\GlassVPN` (SYSTEM and Administrators only), sealed with DPAPI;
   logs in `%ProgramData%\GlassVPN\logs`, 1 MB each with one old copy (the cores log through the service).
 - Control: a local named pipe `\\.\pipe\GlassVPN` (one JSON object per line), for the tray app
-  and for `glassvpnctl` (`status`, `connect`, `add <subscription or vless://>`, `servers`, `logs`…).
+  and for `glassvpnctl` (`status`, `connect`, `add <subscription or vless://>`, `servers`, `logs`…;
+  a `.cmd` that runs the service's exe with `--ctl`, so no second copy of .NET).
+- **Tray app** `GlassVPN.exe` (WinUI 3, Windows App SDK carried along — LTSC has no Store): the
+  shield icon of the other clients with a status dot, light/dark taskbar variants
+  (`make-icons.py`); a click opens a Desktop Acrylic flyout over the tray — state and power button,
+  speed, servers (right-click or Delete removes a key or a subscription), add a subscription or
+  keys, rules, two switches. Notifications when traffic falls back to direct and back. Starts at
+  sign-in, Start menu entry; Exit leaves the VPN running. Idle in the tray: ~64 MB, 20 MB private.
 
 Build on Windows with the .NET 10 SDK:
 

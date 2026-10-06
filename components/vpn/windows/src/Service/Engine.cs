@@ -27,7 +27,7 @@ sealed class Engine : IDisposable
     int fails, restarts;
     int? probeMs;
     string? message;                       // the last thing worth telling the user
-    long lastProbe, lastReconnect, retryAt, resumeAt;
+    long lastProbe, lastReconnect, retryAt, resumeAt, resumedAt = long.MinValue / 2;
     int reconnectGap = 30_000;             // between automatic reconnects, doubles up to 5 min
     volatile bool netDirty = true;
     long netCheckedAt;
@@ -78,11 +78,16 @@ sealed class Engine : IDisposable
     {
         lock (gate)
         {
+            var now = Environment.TickCount64;
+            // Windows reports a wake twice (automatic, then by the user): one is enough
+            if (now - resumedAt < 30_000)
+                return;
+            resumedAt = now;
             Log.Write("power: resumed");
             // after sleep the network often comes back with another address and Xray's
             // long-lived links hang instead of failing: give it fresh ones. Only Xray —
             // the TUN stays, so nothing slips out directly meanwhile
-            resumeAt = Environment.TickCount64 + 5000;
+            resumeAt = now + 5000;
             netDirty = true;
         }
     }
@@ -113,7 +118,9 @@ sealed class Engine : IDisposable
         if (resumeAt != 0 && now >= resumeAt)
         {
             resumeAt = 0;
-            if (wantUp && IsUp)
+            // the network coming back has usually restarted Xray already; another restart
+            // would only cut the connections made since
+            if (wantUp && IsUp && xray!.StartedAt < resumedAt)
                 RestartXray("after sleep");
         }
         CheckProcesses(now);
@@ -496,6 +503,7 @@ sealed class Engine : IDisposable
     async Task<JsonObject> Add(string text)
     {
         var manual = Vless.Lines(text).Select(Vless.Parse).OfType<Server>().ToList();
+        Vless.UniqueNames(manual);
         var urls = Vless.Lines(text).Where(l => l.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
                                                 || l.StartsWith("https://", StringComparison.OrdinalIgnoreCase)).ToList();
         if (manual.Count == 0 && urls.Count == 0)
@@ -676,8 +684,10 @@ sealed class Engine : IDisposable
                 ["name"] = s.Name,
                 ["selected"] = s.Name == cur,
                 ["source"] = s.Sub is null ? "key" : Vless.SubLabel(s.Sub),
+                ["sub_index"] = s.Sub is null ? null : settings.Subscriptions.IndexOf(s.Sub),
                 ["transport"] = $"{s.Type}/{s.Security}",
-                ["latency_ms"] = latencies.TryGetValue(s.Name, out var ms) ? ms : null,
+                // null: not measured yet; -1: measured, no answer
+                ["latency_ms"] = latencies.TryGetValue(s.Name, out var ms) ? ms ?? -1 : null,
             })]),
         };
     }

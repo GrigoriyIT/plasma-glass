@@ -61,11 +61,31 @@ public static class Vless
             }
             catch (FormatException) { }
         }
-        return [.. Lines(text).Select(Parse).OfType<Server>()];
+        var list = Lines(text).Select(Parse).OfType<Server>().ToList();
+        UniqueNames(list);
+        return list;
     }
 
+    /// <summary>Links in pasted text: one per line, several on a line, or glued together — no link
+    /// contains whitespace. Any line break counts (WinUI text boxes use a bare \r).</summary>
     public static IEnumerable<string> Lines(string text) =>
-        text.Split('\n').Select(l => l.Trim()).Where(l => l.Length > 0);
+        // links copied in a row sometimes come glued together: every vless:// starts a new one
+        System.Text.RegularExpressions.Regex.Replace(text, "(?<=\\S)(?=vless://)", "\n",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase)
+            .Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+    /// <summary>Servers are told apart by name: "Germany", "Germany 2", …</summary>
+    public static void UniqueNames(IEnumerable<Server> servers, IEnumerable<string>? taken = null)
+    {
+        var seen = new HashSet<string>(taken ?? [], StringComparer.Ordinal);
+        foreach (var s in servers)
+        {
+            var name = s.Name;
+            for (var i = 2; !seen.Add(name); i++)
+                name = $"{s.Name} {i}";
+            s.Name = name;
+        }
+    }
 
     /// <summary>Host plus a short tail of the path; the token in the URL stays hidden.</summary>
     public static string SubLabel(string url)

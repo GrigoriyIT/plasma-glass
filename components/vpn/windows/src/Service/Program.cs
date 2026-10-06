@@ -14,6 +14,8 @@ static class Program
 {
     static int Main(string[] args)
     {
+        if (args is ["--ctl", .. var ctl])
+            return Ctl.Run(ctl);
         if (args is ["--console"])
         {
             // development: run in the foreground of an elevated console
