@@ -144,13 +144,16 @@ shows and controls it.
   keys, rules, two switches. Notifications when traffic falls back to direct and back. Starts at
   sign-in, Start menu entry; Exit leaves the VPN running. Idle in the tray: ~64 MB, 20 MB private.
 
-Build on Windows with the .NET 10 SDK:
+Install: `GlassVPN-<version>.msi` (per machine, one UAC prompt; upgrades in place, closing the tray
+app; an uninstall keeps the settings and keys in ProgramData). Build on Windows with the .NET 10 SDK
+and WiX 5 (`dotnet tool install -g wix --version 5.0.2`, `wix extension add -g WixToolset.Util.wixext/5.0.2`):
 
 ```powershell
 cd components\vpn\windows
 powershell -ExecutionPolicy Bypass -File fetch-bins.ps1      # sing-box 1.14.2 + Xray 26.3.27, sha256-pinned
-powershell -ExecutionPolicy Bypass -File build.ps1           # -> .\out
-powershell -ExecutionPolicy Bypass -File install.ps1         # elevated; -Uninstall to remove
-glassvpnctl add https://your-subscription-url
-glassvpnctl connect
+powershell -ExecutionPolicy Bypass -File build.ps1 -Msi      # -> .\out and GlassVPN-<version>.msi
+glassvpnctl add https://your-subscription-url                # or "Добавить" in the window
 ```
+
+`install.ps1` installs straight from `.\out` without an MSI (development; `-Uninstall` removes
+everything, data included unless `-KeepData`).

@@ -1,0 +1,62 @@
+<!-- Glass VPN for Windows: one per-machine MSI with the service, the cores, glassvpnctl and the
+     tray app. Built by build.ps1 -Msi from .\out (WiX 5). Settings and keys in ProgramData stay
+     after an uninstall, like any app's data; install.ps1 -Uninstall removes them too. -->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
+  <Package Name="Glass VPN" Manufacturer="Glass VPN" Version="$(Version)" Language="1049" Codepage="1251"
+           UpgradeCode="C4301EE4-47DA-4FDD-87F9-A8392E8E56E1" Scope="perMachine" Compressed="yes">
+    <!-- a rebuilt MSI of the same version replaces the installed one instead of going in beside it -->
+    <MajorUpgrade AllowSameVersionUpgrades="yes" DowngradeErrorMessage="Уже установлена более новая версия Glass VPN." />
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+
+    <Icon Id="GlassVPN.ico" SourceFile="!(bindpath.out)\Assets\GlassVPN.ico" />
+    <Property Id="ARPPRODUCTICON" Value="GlassVPN.ico" />
+    <Property Id="ARPNOMODIFY" Value="1" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="GlassVPN" />
+    </StandardDirectory>
+
+    <!-- the tray app holds its files open: close it before files are replaced or removed -->
+    <util:CloseApplication Target="GlassVPN.exe" CloseMessage="yes" TerminateProcess="1" RebootPrompt="no" />
+
+    <Feature Id="Main">
+      <ComponentGroupRef Id="AppFiles" />
+      <ComponentRef Id="Service" />
+      <ComponentRef Id="Integration" />
+    </Feature>
+
+    <ComponentGroup Id="AppFiles" Directory="INSTALLFOLDER">
+      <Files Include="!(bindpath.out)\**">
+        <Exclude Files="!(bindpath.out)\GlassVpnService.exe" />
+      </Files>
+    </ComponentGroup>
+
+    <Component Id="Service" Directory="INSTALLFOLDER">
+      <File Id="GlassVpnService.exe" Source="!(bindpath.out)\GlassVpnService.exe" KeyPath="yes" />
+      <ServiceInstall Name="GlassVPN" DisplayName="Glass VPN" Type="ownProcess" Start="auto" ErrorControl="normal"
+                      Account="LocalSystem" Description="Glass VPN tunnel: sing-box (TUN) and Xray (VLESS).">
+        <!-- restart 5 s after a crash, every time; the count resets daily -->
+        <util:ServiceConfig FirstFailureActionType="restart" SecondFailureActionType="restart"
+                            ThirdFailureActionType="restart" RestartServiceDelayInSeconds="5" ResetPeriodInDays="1" />
+      </ServiceInstall>
+      <ServiceControl Id="GlassVPN" Name="GlassVPN" Start="install" Stop="both" Remove="uninstall" Wait="yes" />
+    </Component>
+
+    <Component Id="Integration" Directory="INSTALLFOLDER" Guid="3B0D7E0C-5E3B-4C27-9E55-6A3F1A2B7C10">
+      <!-- the tray app at every sign-in, a Start menu entry, glassvpnctl on PATH -->
+      <RegistryValue Root="HKLM" Key="SOFTWARE\Microsoft\Windows\CurrentVersion\Run" Name="GlassVPN"
+                     Value="&quot;[INSTALLFOLDER]GlassVPN.exe&quot;" Type="string" KeyPath="yes" />
+      <Shortcut Id="StartMenu" Directory="ProgramMenuFolder" Name="Glass VPN" Target="[INSTALLFOLDER]GlassVPN.exe"
+                Arguments="--show" WorkingDirectory="INSTALLFOLDER" Icon="GlassVPN.ico" />
+      <Environment Id="Path" Name="PATH" Value="[INSTALLFOLDER]" Part="last" System="yes" Action="set" />
+    </Component>
+
+    <!-- start the tray app for whoever ran the installer (the client side runs as that user) -->
+    <CustomAction Id="LaunchApp" Directory="INSTALLFOLDER" ExeCommand="&quot;[INSTALLFOLDER]GlassVPN.exe&quot;"
+                  Return="asyncNoWait" Impersonate="yes" Execute="immediate" />
+    <InstallExecuteSequence>
+      <Custom Action="LaunchApp" After="InstallFinalize" Condition="NOT REMOVE AND NOT UILevel=2" />
+    </InstallExecuteSequence>
+  </Package>
+</Wix>
