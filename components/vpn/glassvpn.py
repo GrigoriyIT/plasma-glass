@@ -278,6 +278,10 @@ def build_config(server, direct_hosts, local_dns=None, vpn_only=(), direct_apps=
             {"type": "socks", "tag": "proxy", "server": "127.0.0.1", "server_port": SOCKS_PORT, "version": "5"},
             {"type": "socks", "tag": "vpn-only", "server": "127.0.0.1", "server_port": VPN_ONLY_PORT, "version": "5"},
             {"type": "direct", "tag": "direct"},
+            # rule sets download straight, never through the server. sing-box 1.14 refuses a
+            # detour to a bare direct outbound ("makes no sense") and then fails to start
+            # until the sets are cached, so they get one with its own resolver
+            {"type": "direct", "tag": "direct-dl", "domain_resolver": "local"},
         ],
         "route": {
             "rules": [
@@ -293,7 +297,7 @@ def build_config(server, direct_hosts, local_dns=None, vpn_only=(), direct_apps=
             ],
             "rule_set": [
                 {"type": "remote", "tag": tag, "format": "binary", "url": url,
-                 "http_client": {"detour": "direct"}, "update_interval": "7d"}
+                 "http_client": {"detour": "direct-dl"}, "update_interval": "7d"}
                 for tag, url in RULESET_URL.items()
             ],
             "final": "direct" if guard else "proxy",
