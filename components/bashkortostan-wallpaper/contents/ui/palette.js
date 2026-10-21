@@ -26,10 +26,12 @@ function grey(c, k) {
 // colour of every layer.
 const KEYS = [
     { e: -18, top: "#060a1a", hor: "#131a33", light: [0.15, 0.18, 0.30] },
-    { e: -9,  top: "#101839", hor: "#36305c", light: [0.27, 0.27, 0.44] },
-    { e: -3,  top: "#25336b", hor: "#c9706a", light: [0.52, 0.44, 0.56] },
-    { e: 2,   top: "#4869ab", hor: "#f2a565", light: [0.95, 0.72, 0.55] },
-    { e: 8,   top: "#4c82cb", hor: "#f0cfa4", light: [1.0, 0.9, 0.78] },
+    { e: -9,  top: "#0f1739", hor: "#2f2e5c", light: [0.21, 0.24, 0.42] },
+    { e: -6,  top: "#18245a", hor: "#7a5479", light: [0.30, 0.31, 0.52] },
+    { e: -3,  top: "#253a7a", hor: "#d77c6c", light: [0.44, 0.42, 0.62] },
+    { e: 0,   top: "#36589e", hor: "#f29a5e", light: [0.74, 0.58, 0.56] },
+    { e: 3,   top: "#4569ad", hor: "#f5b06a", light: [0.98, 0.76, 0.56] },
+    { e: 8,   top: "#4a81cb", hor: "#f0cfa4", light: [1.0, 0.9, 0.78] },
     { e: 20,  top: "#3b79cd", hor: "#b9d5ee", light: [1.0, 1.0, 1.0] },
     { e: 60,  top: "#2d6cc6", hor: "#a6caed", light: [1.04, 1.04, 1.04] }
 ];
@@ -89,17 +91,23 @@ function colours(st) {
     const c = st.clouds, f = st.fog;
     let top = s.top, hor = s.hor, light = s.light;
     // Overcast: flatter, greyer sky and dimmer light.
-    top = mix(top, grey(top, 1.15), c * 0.8);
-    hor = mix(hor, grey(hor, 1.0), c * 0.75);
-    light = mix(light, grey(light, 0.82), c * 0.6);
+    // (squared: a few clouds leave the sky blue, only overcast turns it grey)
+    top = mix(top, grey(top, 1.15), c * c * 0.85);
+    hor = mix(hor, grey(hor, 1.0), c * c * 0.8);
+    light = mix(light, grey(light, 0.82), c * c * 0.65);
     const season = st.snowGround ? "winter" : st.season;
+    const dusk = clamp((1 - st.elevation) / 11, 0, 0.75);   // fades only after sunset
     const out = { skyTop: rgba(top), skyHorizon: rgba(hor), skyMid: rgba(mix(top, hor, 0.45)) };
     for (const name in BASE) {
         const lit = base(name, season);
         let col = [lit[0] * light[0], lit[1] * light[1], lit[2] * light[2]];
+        // In twilight colours fade: the land loses saturation and goes grey-blue.
+        col = mix(col, [grey(col, 1)[0] * 0.86, grey(col, 1)[1] * 0.92, grey(col, 1)[2] * 1.22], dusk);
         const h = HAZE[name] || 0;
         const haze = clamp(h + f * (1 - h) * (0.35 + h), 0, 0.92);
-        col = mix(col, hor, haze);
+        // far ridges take the warm horizon; nearer ground a cooler sky colour,
+        // or pink haze over brown land turns into mud at dusk
+        col = mix(col, mix(hor, top, h >= 0.4 ? 0.15 : 0.45), haze);
         out[name] = rgba(col);
     }
     // Water reflects the sky: between the horizon and the zenith, a bit darker.
@@ -110,7 +118,9 @@ function colours(st) {
     const day = clamp((st.elevation + 4) / 14, 0, 1);
     // Clouds: white by day, warm near sunset, dark blue at night, grey when overcast.
     let cloud = mix(mix([0.16, 0.19, 0.28], mix(hor, [1, 1, 1], 0.45), day), [1, 1, 1], day * 0.6);
-    cloud = mix(cloud, grey(cloud, 0.82), c * 0.7);
+    const glowCloud = clamp(1 - Math.abs(st.elevation - 1) / 6, 0, 1) * (1 - c * 0.6);
+    cloud = mix(cloud, mix(hor, [1, 0.88, 0.8], 0.35), glowCloud * 0.8);
+    cloud = mix(cloud, grey(cloud, 0.82), c * c * 0.75);
     // Rain and snow clouds are heavy and dark.
     if (st.precip && st.precip !== "none")
         cloud = mix(cloud, grey(cloud, 0.62), 0.55);

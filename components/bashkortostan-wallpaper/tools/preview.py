@@ -33,6 +33,11 @@ STATES = [
     ("Лето, утро, туман", dict(elevation=3, sun=(1000, 533), season="summer", clouds=0.35, fog=0.7)),
 ]
 
+# --set=dusk: from late afternoon to night, every few degrees of sun elevation
+if "--set=dusk" in sys.argv:
+    STATES = [("Солнце %+d°" % e, dict(elevation=e, sun=(4700 + (8 - e) * 40, 575 - e * 14),
+                                       season="autumn", clouds=0.4))
+              for e in (8, 3, 0, -3, -6, -9, -13)]
 if PICK:
     STATES = [STATES[i] for i in PICK]
 app = QGuiApplication(sys.argv)
