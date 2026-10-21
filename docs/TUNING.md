@@ -38,7 +38,7 @@ instead breaks its frame tiles.
 | `BlurStrength` | 7 | 3.5 left sharp details visible through windows |
 | `HighlightStrength` | 0 | the glass rim read as a light leak on translucent popups |
 | `IridescenceStrength`, `RgbDriftStrength`, `MagnifyGlassStrength`, `RefractionWidth` | 0 | coloured glare wedges at corners |
-| Translucency effect, `Inactive` | 70 | inactive windows become frosted glass that stays readable (55 was too see-through to read a window in the background) |
+| Translucency effect, `Inactive` | 80 | inactive windows become frosted glass that stays readable (55 was too see-through to read a window in the background; 80 chosen after trying 70) |
 
 The glass patch keeps the glass at full strength under inactive windows; without
 it the Translucency effect fades the blur too and the window turns into a sharp
