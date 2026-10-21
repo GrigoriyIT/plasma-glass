@@ -4,7 +4,8 @@
 Measures the brightness of the wallpaper strip that sits under the top panel
 and sets Panel Colorizer's foreground to dark text on light wallpapers and
 white text on dark ones. The panel itself is kept fully transparent, with no
-text shadow/outline. Runs from panel-adaptive-text.path whenever the Plasma
+text shadow/outline. The keyboard-layout indicator gets a thin rounded frame in
+the text colour (a Panel Colorizer preset), like the input-source badge on macOS. Runs from panel-adaptive-text.path whenever the Plasma
 desktop config changes; only writes back when something actually changes, so
 its own write doesn't cause a loop.
 """
@@ -99,8 +100,9 @@ def colorizer_settings(cp):
             general = f"{sec}][Configuration][General"
             return (sec, cp.get(general, "globalSettings", fallback=None),
                     cp.get(general, "panelWidgets", fallback="[]"),
-                    cp.get(general, "forceForegroundColor", fallback="{}"))
-    return None, None, "[]", "{}"
+                    cp.get(general, "forceForegroundColor", fallback="{}"),
+                    cp.get(general, "configurationOverrides", fallback="{}"))
+    return None, None, "[]", "{}", "{}"
 
 
 # Never recolor: layout helpers, and Happ, whose tray icon is an opaque
@@ -145,6 +147,35 @@ def apply(settings, text_color):
     return d
 
 
+LAYOUT_WIDGET = "org.kde.plasma.keyboardlayout"
+LAYOUT_PRESET = "layout-frame"
+
+
+def layout_frame(settings, panel_widgets, old_overrides, text_color):
+    """Panel Colorizer preset that draws a thin rounded frame in the text colour
+    around the keyboard-layout widget; other presets are kept as they are."""
+    try:
+        cfg = json.loads(old_overrides)
+    except ValueError:
+        cfg = {}
+    cfg.setdefault("overrides", {})
+    cfg.setdefault("associations", [])
+    layout = [w for w in json.loads(panel_widgets) if w["name"] == LAYOUT_WIDGET]
+    if not layout:
+        return cfg
+    w = json.loads(json.dumps(settings["widgets"]))
+    n = w["normal"]
+    n["radius"] = {"enabled": True, "corner": {k: 5 for k in ("topLeft", "topRight", "bottomRight", "bottomLeft")}}
+    n["margin"] = {"enabled": True, "side": {"top": 6, "bottom": 6, "left": 5, "right": 5}}
+    n["border"].update({"enabled": True, "width": 1, "customSides": False})
+    n["border"]["color"].update({"enabled": True, "sourceType": 0, "custom": text_color, "alpha": 0.75})
+    w["disabledFallback"] = True
+    cfg["overrides"][LAYOUT_PRESET] = w
+    cfg["associations"] = [a for a in cfg["associations"] if a.get("name") != LAYOUT_WIDGET]
+    cfg["associations"].append({"id": layout[0]["id"], "name": LAYOUT_WIDGET, "presets": [LAYOUT_PRESET]})
+    return cfg
+
+
 def main():
     cp = load_config()
     image = current_wallpaper(cp)
@@ -154,7 +185,7 @@ def main():
     sw, sh = screen_size()
     lum = strip_luminance(image, sw, sh)
     text = DARK_TEXT if lum > THRESHOLD else LIGHT_TEXT
-    sec, settings, panel_widgets, old_force = colorizer_settings(cp)
+    sec, settings, panel_widgets, old_force, old_overrides = colorizer_settings(cp)
     if not settings:
         print("Panel Colorizer not found")
         return 1
@@ -170,6 +201,13 @@ def main():
         old_force = {}
     if force != old_force or "--force" in sys.argv:
         writes["forceForegroundColor"] = force
+    overrides = layout_frame(new, panel_widgets, old_overrides, text)
+    try:
+        old_overrides = json.loads(old_overrides)
+    except ValueError:
+        old_overrides = {}
+    if overrides != old_overrides or "--force" in sys.argv:
+        writes["configurationOverrides"] = overrides
     if not writes:
         return 0
     body = "".join("w.writeConfig(%s, %s);" % (json.dumps(k), json.dumps(json.dumps(v, separators=(",", ":"), ensure_ascii=False)))

@@ -96,6 +96,13 @@ foreground colour and forced icon recolouring driven by
 `panel-adaptive-text`. The global menu is recoloured every 150 ms because its
 entries are rebuilt on every window switch.
 
+The keyboard-layout indicator sits in a thin rounded frame (1 px, radius 5, the
+text colour at 75%), like the input-source badge on macOS. It is a Panel
+Colorizer preset (`layout-frame`) that `panel-adaptive-text` writes together with
+the text colour, so the frame turns white with the text on dark wallpapers. The
+label font is left at the widget's default; bolder or larger labels looked heavy
+next to the tray icons.
+
 ## Gestures
 
 `~/.config/inputactions/config.yaml`: `motion_threshold_3: 3`, `angle_tolerance: 30`,
