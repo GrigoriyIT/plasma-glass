@@ -24,6 +24,8 @@ COLORIZER = "luisbocanegra.panel.colorizer"
 DEFAULT_IMAGES = {
     "local.clockwallpaper": "/usr/share/wallpapers/ColdRipple/contents/images/2560x1600.jpg",
 }
+# Wallpaper plugins that report their own sky brightness (SkyLuminance).
+SELF_REPORTING = {"org.plasmaglass.bashkortostan"}
 DARK_TEXT = "#1d1d1f"
 LIGHT_TEXT = "#ffffff"
 # Mean luminance (0..1) above which the strip counts as "light".
@@ -65,7 +67,8 @@ def resolve_image(path):
 
 
 def current_wallpaper(cp):
-    """Wallpaper image of the desktop on the primary screen (lastScreen=0)."""
+    """Wallpaper image of the desktop on the primary screen (lastScreen=0),
+    or the sky luminance (a float) reported by a drawn wallpaper."""
     for sec in cp.sections():
         if not re.fullmatch(r"Containments\]\[\d+", sec):
             continue
@@ -74,8 +77,12 @@ def current_wallpaper(cp):
         if cp.get(sec, "lastScreen", fallback="") != "0":
             continue
         plugin = cp.get(sec, "wallpaperplugin", fallback="org.kde.image")
-        img = cp.get(f"{sec}][Wallpaper][{plugin}][General", "Image",
-                     fallback=DEFAULT_IMAGES.get(plugin, ""))
+        general = f"{sec}][Wallpaper][{plugin}][General"
+        if plugin in SELF_REPORTING:
+            # Drawn wallpapers have no image to measure: they write the
+            # brightness of the sky under the bar into their own config.
+            return float(cp.get(general, "SkyLuminance", fallback="0.5"))
+        img = cp.get(general, "Image", fallback=DEFAULT_IMAGES.get(plugin, ""))
         return resolve_image(img)
     return None
 
@@ -182,8 +189,11 @@ def main():
     if not image:
         print("wallpaper image not found; leaving panel as is")
         return 0
-    sw, sh = screen_size()
-    lum = strip_luminance(image, sw, sh)
+    if isinstance(image, float):
+        lum = image
+    else:
+        sw, sh = screen_size()
+        lum = strip_luminance(image, sw, sh)
     text = DARK_TEXT if lum > THRESHOLD else LIGHT_TEXT
     sec, settings, panel_widgets, old_force, old_overrides = colorizer_settings(cp)
     if not settings:

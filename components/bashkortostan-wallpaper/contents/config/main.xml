@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<kcfg xmlns="http://www.kde.org/standards/kcfg/1.0"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="http://www.kde.org/standards/kcfg/1.0 http://www.kde.org/standards/kcfg/1.0/kcfg.xsd">
+  <kcfgfile name=""/>
+  <group name="General">
+    <!-- Where the sun, the moon and the weather are taken from (default: Ufa) -->
+    <entry name="Latitude" type="Double">
+      <default>54.7558</default>
+    </entry>
+    <entry name="Longitude" type="Double">
+      <default>56.005</default>
+    </entry>
+    <!-- Falling rain and snow, drifting clouds -->
+    <entry name="Animate" type="Bool">
+      <default>true</default>
+    </entry>
+    <!-- Vertical position of the clock's center, percent of screen height -->
+    <entry name="VerticalPosition" type="Int">
+      <default>22</default>
+    </entry>
+    <entry name="ClockFont" type="String">
+      <default>SF Pro Display</default>
+    </entry>
+    <!-- QFont weight: 100 Thin, 200 Ultralight, 300 Light, 400 Regular, 500 Medium, 600 Semibold -->
+    <entry name="ClockWeight" type="Int">
+      <default>300</default>
+    </entry>
+    <entry name="ShowDate" type="Bool">
+      <default>true</default>
+    </entry>
+    <!-- Panorama: the clock is drawn on the middle screen only unless this is set -->
+    <entry name="ClockEverywhere" type="Bool">
+      <default>false</default>
+    </entry>
+    <!-- Testing: "elevation=-20;precip=snow;clouds=0.9" overrides the real sky -->
+    <entry name="Override" type="String">
+      <default></default>
+    </entry>
+    <!-- Written by the wallpaper: sky brightness under the top bar (panel-adaptive-text) -->
+    <entry name="SkyLuminance" type="Double">
+      <default>0.5</default>
+    </entry>
+  </group>
+</kcfg>

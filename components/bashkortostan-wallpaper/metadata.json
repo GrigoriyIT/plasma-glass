@@ -1,0 +1,15 @@
+{
+    "KPackageStructure": "Plasma/Wallpaper",
+    "KPlugin": {
+        "Authors": [{ "Name": "Plasma Glass contributors" }],
+        "Description": "Landscapes of Bashkortostan over three screens, lit by the real sun and moon, with the season, the weather and a clock",
+        "Description[ru]": "Пейзаж Башкортостана на три экрана: настоящее солнце и луна, сезон, погода и часы",
+        "Icon": "weather-few-clouds",
+        "Id": "org.plasmaglass.bashkortostan",
+        "License": "GPL-3.0-or-later",
+        "Name": "Bashkortostan",
+        "Name[ru]": "Башкортостан",
+        "Version": "1.0"
+    },
+    "X-Plasma-API-Minimum-Version": "6.0"
+}
