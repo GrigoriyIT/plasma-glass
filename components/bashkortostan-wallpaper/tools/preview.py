@@ -68,16 +68,17 @@ for title, st in STATES:
     frames.append((title, img))
     v.close()
 
-pad = 36
+pad = 0 if "--nolabel" in sys.argv else 36
 sheet = QImage(W, len(frames) * (H + pad), QImage.Format.Format_RGB32)
 sheet.fill(QColor("#1b1b1b"))
 p = QPainter(sheet)
 f = QFont("DejaVu Sans"); f.setPixelSize(20); p.setFont(f)
 for i, (title, img) in enumerate(frames):
     y = i * (H + pad)
-    p.setPen(QColor("#e8e8e8")); p.drawText(10, y + 25, title)
+    if pad:
+        p.setPen(QColor("#e8e8e8")); p.drawText(10, y + 25, title)
     p.drawImage(0, y + pad, img)
-    p.setPen(QColor(255, 255, 255, 60))
+    p.setPen(QColor(255, 255, 255, 60 if pad else 0))
     for sx in (() if SINGLE or SLICE is not None else (640, 1280)):
         p.drawLine(sx, y + pad, sx, y + pad + H)
 p.end()

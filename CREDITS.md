@@ -17,6 +17,7 @@ except where a file below says it is derived from one of them.
 | [ZXing](https://github.com/zxing/zxing) | Apache-2.0 | QR codes in Glass VPN for Android (TV "add from phone"), bundled in the APK |
 | [Inter](https://github.com/rsms/inter) by Rasmus Andersson | SIL OFL 1.1 | Lettering of the Android TV banner (`make-banner.py`; the font itself isn't bundled) |
 | [Guake](https://github.com/Guake/guake) | GPL-2.0-or-later | Drop-down terminal |
+| [MET Norway Locationforecast](https://api.met.no/) | NLOD 2.0 / CC BY 4.0 (data) | Weather in the weather widget and the Bashkortostan wallpaper (fetched at run time) |
 | [Panel Colorizer](https://github.com/luisbocanegra/plasma-panel-colorizer) by Luis Bocanegra | GPL-3.0 | Top bar transparency and recolouring (installed by MacTahoe) |
 
 ## Files derived from other projects

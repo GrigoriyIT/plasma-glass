@@ -37,6 +37,9 @@ Mi TV 4S/4A); it also installs on phones that refuse the phone build. Details:
   switch between dark and light to match the wallpaper under it.
 - **Clock wallpaper.** Any image with a large centred clock and date; it redraws
   once a minute, so it costs almost nothing.
+- **Bashkortostan landscape.** A drawn panorama over three screens (or one screen)
+  lit by the real sun and moon over your city, with the season and the current
+  weather: rain and snow fall, clouds drift, a lamp lights up in the yurt at dusk.
 - **Touchpad gestures.** Three fingers left/right switch applications, up shows all
   windows, down shows the windows of the current application.
 - **Drop-down terminal.** Guake slides strictly vertically from the top edge on F12,
@@ -69,6 +72,7 @@ KWin upgrade.
 | [`components/icons`](components/icons) | *Plasma Glass* icon theme (Breeze Dark + Colloid apps + launcher tile) |
 | [`components/launcher`](components/launcher) | MacTahoe launcher QML with a left category column |
 | [`components/clock-wallpaper`](components/clock-wallpaper) | Wallpaper plugin: image + large clock |
+| [`components/bashkortostan-wallpaper`](components/bashkortostan-wallpaper) | Wallpaper plugin: Bashkortostan landscape with the real sun, moon, season and weather |
 | [`components/adaptive-panel`](components/adaptive-panel) | Top bar text/icon colour follows the wallpaper |
 | [`components/gestures`](components/gestures) | Touchpad gestures (InputActions config + *App Cycle* KWin script) |
 | [`components/edge-snap`](components/edge-snap) | Wider side-edge zone for half-screen snapping, smaller quarter-tile corners |

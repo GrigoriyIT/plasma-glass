@@ -96,6 +96,13 @@ cp -r components/clock-wallpaper/local.clockwallpaper ~/.local/share/plasma/wall
 Right-click the desktop → *Configure Desktop and Wallpaper* → *Clock Wallpaper*.
 Pick the image, the clock position, font and weight there.
 
+Instead of an image, the drawn Bashkortostan landscape with the real sun, moon,
+season and weather (see [its README](../components/bashkortostan-wallpaper/README.md)):
+
+```bash
+components/bashkortostan-wallpaper/install.sh            # every desktop; --restore to go back
+```
+
 ## 7. Adaptive top bar
 
 Needs MacTahoe's Panel Colorizer widget on the top panel.
