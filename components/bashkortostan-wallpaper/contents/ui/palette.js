@@ -67,7 +67,11 @@ const BASE = {
     birchTrunks:{ all: "#efeee6" },
     birchMarks: { all: "#2b2a28" },
     birchBranches: { all: "#5b4a3a" },
-    birchCrowns:{ summer: "#5b9a41", autumn: "#e5b03a", winter: "#7a6e62", spring: "#a5d36a" }
+    birchTwigs: { all: "#6e5d4d" },
+    birchLeavesDark:  { summer: "#3c7631", autumn: "#a8741d", winter: "#7a6e62", spring: "#78a843" },
+    birchLeavesMid:   { summer: "#5a973f", autumn: "#d9a62b", winter: "#7a6e62", spring: "#9ccb5b" },
+    birchLeavesLight: { summer: "#8bbf58", autumn: "#f3d366", winter: "#7a6e62", spring: "#c2e384" },
+    birchFallen:      { all: "#c7932b" }
 };
 
 // Share of the horizon colour mixed in: aerial perspective.

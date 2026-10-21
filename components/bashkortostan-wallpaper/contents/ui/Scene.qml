@@ -138,10 +138,19 @@ Item {
             Layer { d: root.sc.smoke; fill: root.c.smoke; visible: root.precip !== "rain" }
             Layer { d: root.sc.yurtDoor; fill: root.c.yurtDoor }
             Layer { d: root.sc.yurtDoor; fill: "#ffb35a"; opacity: root.c.lamp; visible: opacity > 0 }
+            Layer { d: root.sc.birchFallen; fill: root.c.birchFallen; visible: root.season === "autumn" && !root.snowGround }
             Layer { d: root.sc.birchBranches; fill: root.c.birchBranches }
+            Layer { d: root.sc.birchTwigs; fill: root.c.birchTwigs }
             Layer { d: root.sc.birchTrunks; fill: root.c.birchTrunks }
             Layer { d: root.sc.birchMarks; fill: root.c.birchMarks }
-            Layer { d: root.sc.birchCrowns; fill: root.c.birchCrowns; opacity: root.snowGround || root.season === "winter" ? 0 : 0.96 }
+            Item {
+                // leaves: none in winter, sparse in early spring
+                anchors.fill: parent
+                visible: !root.snowGround && root.season !== "winter"
+                Layer { d: root.sc.birchLeavesDark; fill: root.c.birchLeavesDark }
+                Layer { d: root.sc.birchLeavesMid; fill: root.c.birchLeavesMid }
+                Layer { d: root.sc.birchLeavesLight; fill: root.c.birchLeavesLight }
+            }
             Layer { d: root.sc.grass; fill: root.c.grass }
         }
 

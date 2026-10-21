@@ -1,6 +1,6 @@
 # Credentials and machine-specific helpers — never commit
 .env
-tools/
+/tools/
 .claude/
 
 # Build and editor leftovers
