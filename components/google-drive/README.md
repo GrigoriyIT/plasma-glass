@@ -38,7 +38,9 @@ rclone's shared client id is being retired and stops working during 2026, and
 it is rate-limited for everyone. Create your own (free):
 
 1. [Google Cloud Console](https://console.cloud.google.com/) → create a project
-   (any name, e.g. *rclone*).
+   (any name, e.g. *rclone*), or use one you already have. In an existing
+   project, still create a separate *Desktop app* client for rclone (step 5):
+   either app's key can then be revoked without breaking the other.
 2. *APIs & Services → Library* → **Google Drive API** → *Enable*.
 3. *Google Auth Platform* (OAuth consent screen) → *Get started*: app name,
    support e-mail, audience **External**, contact e-mail.
@@ -50,6 +52,7 @@ it is rate-limited for everyone. Create your own (free):
    the sign-in expire after a week. If *Publish* is greyed out, fill in a
    homepage and a privacy policy URL in *Branding* first. A personal app
    needs no verification; at sign-in click through "Google hasn't verified this
-   app".
+   app" (*Advanced* → *Go to … (unsafe)*). Publishing also stops the weekly
+   expiry for every other app that signs in through the same project.
 7. `components/google-drive/install.sh CLIENT_ID CLIENT_SECRET` — it switches
    the existing remote to your client and signs in again.
